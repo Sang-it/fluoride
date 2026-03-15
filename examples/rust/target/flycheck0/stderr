@@ -1,0 +1,50 @@
+   0.056858000s  INFO prepare_target{force=false package_id=code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust) target="code-points-rust-example"}: cargo::core::compiler::fingerprint: fingerprint error for code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust)/Check { test: false }/TargetInner { name: "code-points-rust-example", doc: true, ..: with_path("/Users/sangitmanandhar/Projects/code-points/examples/rust/src/main.rs", Edition2021) }
+   0.056877709s  INFO prepare_target{force=false package_id=code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust) target="code-points-rust-example"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/sangitmanandhar/Projects/code-points/examples/rust/target/debug/.fingerprint/code-points-rust-example-cb478812b2a5e554/bin-code-points-rust-example`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.060811375s  INFO prepare_target{force=false package_id=code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust) target="code-points-rust-example"}: cargo::core::compiler::fingerprint: fingerprint error for code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust)/Check { test: true }/TargetInner { name: "code-points-rust-example", doc: true, ..: with_path("/Users/sangitmanandhar/Projects/code-points/examples/rust/src/main.rs", Edition2021) }
+   0.060822209s  INFO prepare_target{force=false package_id=code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust) target="code-points-rust-example"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/sangitmanandhar/Projects/code-points/examples/rust/target/debug/.fingerprint/code-points-rust-example-772286015704ec34/test-bin-code-points-rust-example`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: <std::io::error::Error as anyhow::context::ext::StdError>::ext_context::<alloc::string::String>
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::cli::main
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+    Checking code-points-rust-example v0.1.0 (/Users/sangitmanandhar/Projects/code-points/examples/rust)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s

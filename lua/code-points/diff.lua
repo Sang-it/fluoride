@@ -10,36 +10,6 @@ local function buf_line_ending(bufnr)
   return "\n"
 end
 
---- Find the length of the common prefix between two strings.
---- @param a string
---- @param b string
---- @return number
-local function common_prefix_len(a, b)
-  local len = math.min(#a, #b)
-  for i = 1, len do
-    if a:byte(i) ~= b:byte(i) then
-      return i - 1
-    end
-  end
-  return len
-end
-
---- Find the length of the common suffix between two strings.
---- @param a string
---- @param b string
---- @return number
-local function common_suffix_len(a, b)
-  local a_len = #a
-  local b_len = #b
-  local len = math.min(a_len, b_len)
-  for i = 0, len - 1 do
-    if a:byte(a_len - i) ~= b:byte(b_len - i) then
-      return i
-    end
-  end
-  return len
-end
-
 --- Apply new content to a buffer using minimal diffs.
 --- Uses vim.diff to compute change hunks, converts them to LSP TextEdit
 --- objects, and applies via vim.lsp.util.apply_text_edits. This avoids
@@ -68,7 +38,8 @@ function M.apply_minimal(bufnr, new_lines)
     return
   end
 
-  -- Convert diff hunks to LSP TextEdit objects
+  -- Convert diff hunks to LSP TextEdit objects.
+  -- All edits use full-line ranges to avoid character-level edge cases.
   local text_edits = {}
 
   for _, idx in ipairs(indices) do
@@ -76,7 +47,6 @@ function M.apply_minimal(bufnr, new_lines)
 
     local is_insert = orig_count == 0
     local is_delete = new_count == 0
-    local is_replace = not is_insert and not is_delete
 
     -- Build the replacement text from the new lines
     local replacement = {}
@@ -86,54 +56,30 @@ function M.apply_minimal(bufnr, new_lines)
       end
     end
 
-    local new_text_str = table.concat(replacement, line_ending)
-
-    -- Compute the range in the original buffer
     local start_line, start_char, end_line, end_char
+    local new_text_str
 
     if is_insert then
-      -- Insert after orig_start (which is the line before the insertion point)
-      -- In LSP terms, insert at the beginning of the next line
+      -- Insert at the beginning of the line after orig_start
       start_line = orig_start
       start_char = 0
       end_line = orig_start
       end_char = 0
-      new_text_str = new_text_str .. line_ending
+      new_text_str = table.concat(replacement, line_ending) .. line_ending
     elseif is_delete then
-      start_line = orig_start - 1 -- convert to 0-indexed
+      -- Delete full lines: from start of first line to start of line after last
+      start_line = orig_start - 1 -- 0-indexed
       start_char = 0
-      end_line = orig_start + orig_count - 1 -- 0-indexed, exclusive end line
+      end_line = orig_start + orig_count - 1 -- 0-indexed, one past last deleted line
       end_char = 0
       new_text_str = ""
     else
-      -- Replace
-      local orig_line_start = orig_start -- 1-indexed
-      local orig_line_end = orig_start + orig_count - 1 -- 1-indexed
-
-      start_line = orig_line_start - 1 -- 0-indexed
+      -- Replace full lines: from start of first line to start of line after last
+      start_line = orig_start - 1 -- 0-indexed
       start_char = 0
-      end_line = orig_line_end - 1 -- 0-indexed
-      end_char = #original_lines[orig_line_end]
-
-      -- Try to narrow the edit with common prefix/suffix on the boundary lines
-      if is_replace and #replacement > 0 then
-        local prefix = common_prefix_len(original_lines[orig_line_start] or "", replacement[1])
-        if prefix > 0 then
-          start_char = prefix
-          replacement[1] = replacement[1]:sub(prefix + 1)
-        end
-
-        local suffix = common_suffix_len(original_lines[orig_line_end] or "", replacement[#replacement])
-        if orig_line_end == orig_line_start then
-          suffix = math.min(suffix, #(original_lines[orig_line_end] or "") - prefix)
-        end
-        if suffix > 0 then
-          end_char = #(original_lines[orig_line_end] or "") - suffix
-          replacement[#replacement] = replacement[#replacement]:sub(1, #replacement[#replacement] - suffix)
-        end
-
-        new_text_str = table.concat(replacement, line_ending)
-      end
+      end_line = orig_start + orig_count - 1 -- 0-indexed, one past last replaced line
+      end_char = 0
+      new_text_str = table.concat(replacement, line_ending) .. line_ending
     end
 
     table.insert(text_edits, {

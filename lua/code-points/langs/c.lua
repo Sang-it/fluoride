@@ -17,6 +17,9 @@ local SKIP_TYPES = {
   preproc_endif = true,
   preproc_call = true,
   linkage_specification = true, -- extern "C" { ... }
+  empty_declaration = true,     -- standalone ;
+  empty_statement = true,       -- standalone ;
+  [";"] = true,                 -- standalone ;
 }
 
 M.highlights = {
@@ -65,7 +68,7 @@ function M.get_name(node, bufnr)
     end
   end
 
-  -- declaration: int x = 5; or void foo(void); (forward declaration)
+  -- declaration: int x = 5; or void foo(void); or enum Foo { ... };
   if node_type == "declaration" then
     local declarator = node:field("declarator")[1]
     if declarator then
@@ -83,6 +86,18 @@ function M.get_name(node, bufnr)
       end
       local text = vim.treesitter.get_node_text(declarator, bufnr)
       return text:match("^[%*]*(%w+)") or text
+    end
+
+    -- No declarator — bare type declaration (e.g., enum SortOrder { ... };)
+    -- Look at the type field for struct/enum/union specifiers
+    for child in node:iter_children() do
+      local ct = child:type()
+      if ct == "struct_specifier" or ct == "enum_specifier" or ct == "union_specifier" then
+        local name_node = child:field("name")[1]
+        if name_node then
+          return vim.treesitter.get_node_text(name_node, bufnr)
+        end
+      end
     end
   end
 
@@ -153,6 +168,15 @@ function M.get_display_type(node, bufnr)
       if declarator:type() == "function_declarator" then
         return "function"
       end
+      return "variable"
+    end
+
+    -- No declarator — bare type declaration (e.g., enum SortOrder { ... };)
+    for child in node:iter_children() do
+      local ct = child:type()
+      if ct == "struct_specifier" then return "struct" end
+      if ct == "enum_specifier" then return "enum" end
+      if ct == "union_specifier" then return "union" end
     end
     return "variable"
   end

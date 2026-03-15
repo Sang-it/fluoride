@@ -15,6 +15,7 @@ local DECLARATION_TYPES = {
 
 local SKIP_TYPES = {
   comment = true,
+  return_statement = true,
 }
 
 M.highlights = {

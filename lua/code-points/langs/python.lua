@@ -19,6 +19,7 @@ local SKIP_TYPES = {
   import_statement = true,
   import_from_statement = true,
   future_import_statement = true,
+  if_statement = true,
 }
 
 M.highlights = {

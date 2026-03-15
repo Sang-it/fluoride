@@ -78,10 +78,24 @@ function M.get_code_points(bufnr)
 
   for child in root:iter_children() do
     if lang.is_declaration(child) then
-      local sr, _, er, _ = child:range()
+      local sr, _, er, ec = child:range()
+
+      -- If end_col is 0, the node ends at the start of end_row (i.e., just the
+      -- newline of the previous line). Don't include that extra line.
+      -- This is common with preprocessor directives in C/C++.
+      if ec == 0 and er > sr then
+        er = er - 1
+      end
+
+      local name = lang.get_name(child, bufnr)
+
+      -- Fallback: if the language module couldn't extract a name, use the line number
+      if not name or name == "[unknown]" then
+        name = "<L" .. (sr + 1) .. ">"
+      end
 
       table.insert(entries, {
-        name = lang.get_name(child, bufnr),
+        name = name,
         display_type = lang.get_display_type(child, bufnr),
         arity = lang.get_arity(child, bufnr),
         start_row = sr,

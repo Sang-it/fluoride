@@ -287,21 +287,14 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang)
   local parsed_groups = {} -- list of { prefix, name, children, new_comments }
 
   local current_parent = nil
-  local pending_comments = {}       -- comment lines waiting to be attached to the next parent
-  local pending_child_comments = {} -- comment lines waiting to be attached to the next child
+  local pending_comments = {} -- comment lines waiting to be attached to the next entry
 
   for _, line in ipairs(new_display_lines) do
     local trimmed = vim.trim(line)
 
     -- Check if this is a new comment line (starts with //)
     if trimmed:sub(1, 2) == "//" then
-      if current_parent then
-        -- Inside a parent's children section — attach to next child
-        table.insert(pending_child_comments, trimmed)
-      else
-        -- Top-level — attach to next parent
-        table.insert(pending_comments, trimmed)
-      end
+      table.insert(pending_comments, trimmed)
     else
       local is_child, content = parse_child_prefix(line)
       local prefix, name = parse_display_content(content, type_prefixes)
@@ -317,12 +310,10 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang)
         table.insert(current_parent.children, {
           prefix = prefix,
           name = name,
-          new_comments = pending_child_comments,
+          new_comments = pending_comments,
         })
-        pending_child_comments = {}
+        pending_comments = {}
       else
-        -- Reset child comments when moving to a new parent
-        pending_child_comments = {}
         current_parent = { prefix = prefix, name = name, children = {}, new_comments = pending_comments }
         pending_comments = {}
         table.insert(parsed_groups, current_parent)

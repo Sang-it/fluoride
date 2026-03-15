@@ -95,9 +95,12 @@ local function open_centered_float(buf, title)
     border = "rounded",
     title = " " .. title .. " ",
     title_pos = "center",
+    footer = " :w save | q quit ",
+    footer_pos = "center",
   })
 
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
+  vim.api.nvim_set_option_value("number", true, { win = win })
 
   return win
 end

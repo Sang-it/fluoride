@@ -148,11 +148,34 @@ function M.open(source_bufnr, entries)
   -- Apply initial syntax highlighting
   apply_highlights(buf)
 
-  -- Refresh highlights when buffer text changes (e.g., after dd+p to move lines)
+  -- Add help footer at the bottom of the window
+  local footer_ns = vim.api.nvim_create_namespace("code_points_footer")
+  local function update_footer()
+    vim.api.nvim_buf_clear_namespace(buf, footer_ns, 0, -1)
+    local line_count = vim.api.nvim_buf_line_count(buf)
+    local win_height = vim.api.nvim_win_get_height(win)
+    -- Calculate how many blank lines to pad before the footer
+    local pad = win_height - line_count - 1
+    local virt_lines = {}
+    if pad > 0 then
+      for _ = 1, pad do
+        table.insert(virt_lines, { { "", "Comment" } })
+      end
+    end
+    table.insert(virt_lines, { { ":w=submit  q=cancel", "Comment" } })
+    vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
+      virt_lines = virt_lines,
+      virt_lines_above = false,
+    })
+  end
+  update_footer()
+
+  -- Refresh highlights and footer when buffer text changes (e.g., after dd+p to move lines)
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
     buffer = buf,
     callback = function()
       apply_highlights(buf)
+      update_footer()
     end,
   })
 

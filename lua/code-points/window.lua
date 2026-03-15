@@ -80,8 +80,8 @@ end
 --- @param title string window title
 --- @return number win window handle
 local function open_centered_float(buf, title)
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor(vim.o.lines * 0.8)
+  local width = math.floor(vim.o.columns * 0.4)
+  local height = math.floor(vim.o.lines * 0.4)
   local row = math.floor((vim.o.lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
 

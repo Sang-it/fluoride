@@ -162,22 +162,44 @@ local function get_arity(node)
   return nil
 end
 
+--- Extract the actual variable keyword (const, let, var) from a declaration node.
+--- @param node any treesitter node
+--- @param bufnr number buffer handle
+--- @return string keyword "const", "let", or "var"
+local function get_variable_keyword(node, bufnr)
+  -- The first child of a lexical_declaration/variable_declaration is the keyword
+  for child in node:iter_children() do
+    local text = vim.treesitter.get_node_text(child, bufnr)
+    if text == "const" or text == "let" or text == "var" then
+      return text
+    end
+  end
+  return "const" -- fallback
+end
+
 --- Get the display type for a node (handles export wrapping).
 --- @param node any treesitter node
+--- @param bufnr number buffer handle
 --- @return string display_type
-local function get_display_type(node)
+local function get_display_type(node, bufnr)
   local node_type = node:type()
 
   if node_type == "export_statement" then
     -- Look for the inner declaration type
     for child in node:iter_children() do
       local child_type = child:type()
-      local mapped = DECLARATION_TYPES[child_type]
-      if mapped and child_type ~= "export_statement" then
-        return "export " .. mapped
+      if DECLARATION_TYPES[child_type] and child_type ~= "export_statement" then
+        if child_type == "lexical_declaration" or child_type == "variable_declaration" then
+          return "export " .. get_variable_keyword(child, bufnr)
+        end
+        return "export " .. DECLARATION_TYPES[child_type]
       end
     end
     return "export"
+  end
+
+  if node_type == "lexical_declaration" or node_type == "variable_declaration" then
+    return get_variable_keyword(node, bufnr)
   end
 
   return DECLARATION_TYPES[node_type] or node_type
@@ -213,7 +235,7 @@ function M.get_code_points(bufnr)
       local sr, _, er, _ = child:range()
       local lines = vim.api.nvim_buf_get_lines(bufnr, sr, er + 1, false)
       local name = get_declaration_name(child, bufnr)
-      local display_type = get_display_type(child)
+      local display_type = get_display_type(child, bufnr)
 
       local arity = get_arity(child)
 

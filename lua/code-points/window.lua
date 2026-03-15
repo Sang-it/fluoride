@@ -2,6 +2,79 @@ local reorder = require("code-points.reorder")
 
 local M = {}
 
+local ns = vim.api.nvim_create_namespace("code_points_hl")
+
+-- Maps type prefix → { prefix_hl, name_hl }
+local HIGHLIGHT_MAP = {
+  ["function"]         = { prefix = "Keyword",  name = "Function" },
+  ["export function"]  = { prefix = "Keyword",  name = "Function" },
+  ["variable"]         = { prefix = "Keyword",  name = "Identifier" },
+  ["export variable"]  = { prefix = "Keyword",  name = "Identifier" },
+  ["class"]            = { prefix = "Type",     name = "Type" },
+  ["export class"]     = { prefix = "Type",     name = "Type" },
+  ["interface"]        = { prefix = "Type",     name = "Type" },
+  ["export interface"] = { prefix = "Type",     name = "Type" },
+  ["type"]             = { prefix = "Type",     name = "Type" },
+  ["export type"]      = { prefix = "Type",     name = "Type" },
+  ["enum"]             = { prefix = "Type",     name = "Type" },
+  ["export enum"]      = { prefix = "Type",     name = "Type" },
+  ["export"]           = { prefix = "Keyword",  name = "Identifier" },
+  ["expression"]       = { prefix = "Keyword",  name = "Identifier" },
+}
+
+-- Sorted by length descending so we match two-word prefixes before one-word
+local SORTED_PREFIXES = {}
+for prefix in pairs(HIGHLIGHT_MAP) do
+  table.insert(SORTED_PREFIXES, prefix)
+end
+table.sort(SORTED_PREFIXES, function(a, b) return #a > #b end)
+
+--- Apply syntax highlighting to all lines in the code points buffer.
+--- Each line has the format: <type_prefix> <name> [L<line_number>]
+--- @param buf number buffer handle
+local function apply_highlights(buf)
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+  for i, line in ipairs(lines) do
+    local lnum = i - 1 -- 0-indexed
+
+    -- Find the matching type prefix (longest match first)
+    local matched_prefix = nil
+    for _, prefix in ipairs(SORTED_PREFIXES) do
+      if line:sub(1, #prefix) == prefix and line:sub(#prefix + 1, #prefix + 1) == " " then
+        matched_prefix = prefix
+        break
+      end
+    end
+
+    if matched_prefix then
+      local hl = HIGHLIGHT_MAP[matched_prefix]
+
+      -- Highlight the type prefix
+      vim.api.nvim_buf_add_highlight(buf, ns, hl.prefix, lnum, 0, #matched_prefix)
+
+      -- Parse the rest: "<name> [L<number>]"
+      local after_prefix = line:sub(#matched_prefix + 2) -- skip prefix + space
+      local name, line_info = after_prefix:match("^(.+)%s+(%[L%d+%])$")
+
+      if name and line_info then
+        local name_start = #matched_prefix + 1 -- byte after the space
+        local name_end = name_start + #name
+
+        -- Highlight the symbol name
+        vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, name_end)
+
+        -- Highlight [L<n>] as comment
+        local info_start = name_end + 1 -- byte after the space
+        local info_end = info_start + #line_info
+        vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, info_start, info_end)
+      end
+    end
+  end
+end
+
 --- Build display lines from code point entries.
 --- Format: "type name [L<line>]"
 --- @param entries table[] list of code point entries from treesitter module
@@ -64,6 +137,17 @@ function M.open(source_bufnr, entries)
 
   -- Open the float
   local win = open_centered_float(buf, "Code Points")
+
+  -- Apply initial syntax highlighting
+  apply_highlights(buf)
+
+  -- Refresh highlights when buffer text changes (e.g., after dd+p to move lines)
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    buffer = buf,
+    callback = function()
+      apply_highlights(buf)
+    end,
+  })
 
   -- Map 'q' to close the window (normal mode)
   vim.keymap.set("n", "q", function()

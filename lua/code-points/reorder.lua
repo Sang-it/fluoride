@@ -18,11 +18,18 @@ local TYPE_PREFIXES = {
   "expression",
 }
 
+--- Strip the arity suffix (e.g., "/2") from a name.
+--- @param name string
+--- @return string name_without_arity
+local function strip_arity(name)
+  return name:match("^(.+)/%d+$") or name
+end
+
 --- Parse a display line to extract the type prefix and name.
---- Display format: "<type_prefix> <name>"
+--- Display format: "<type_prefix> <name>" or "<type_prefix> <name>/<arity>"
 --- @param line string the display line from the float buffer
 --- @return string|nil prefix the type prefix, or nil if unparseable
---- @return string|nil name the extracted name, or nil if unparseable
+--- @return string|nil name the extracted name (without arity), or nil if unparseable
 local function parse_display_line(line)
   local trimmed = vim.trim(line)
   if trimmed == "" then
@@ -35,13 +42,13 @@ local function parse_display_line(line)
       local rest = trimmed:sub(#prefix + 1)
       rest = vim.trim(rest)
       if rest ~= "" then
-        return prefix, rest
+        return prefix, strip_arity(rest)
       end
     end
   end
 
   -- Fallback: no recognized prefix
-  return nil, trimmed
+  return nil, strip_arity(trimmed)
 end
 
 --- Build an index mapping from display_type to entries (for matching by type prefix).

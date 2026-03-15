@@ -56,21 +56,34 @@ local function apply_highlights(buf)
       -- Highlight the type prefix
       vim.api.nvim_buf_add_highlight(buf, ns, hl.prefix, lnum, 0, #matched_prefix)
 
-      -- Highlight the symbol name (everything after the prefix)
+      -- Highlight the symbol name and arity
+      local after_prefix = line:sub(#matched_prefix + 2) -- skip prefix + space
       local name_start = #matched_prefix + 1 -- byte after the space
-      vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, -1)
+
+      -- Check if there's an arity suffix like "/2"
+      local name_part, arity_part = after_prefix:match("^(.+)(/%d+)$")
+      if name_part and arity_part then
+        local name_end = name_start + #name_part
+        vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, name_end)
+        vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, name_end, name_end + #arity_part)
+      else
+        vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, -1)
+      end
     end
   end
 end
 
 --- Build display lines from code point entries.
---- Format: "type name"
+--- Format: "type name" or "type name/arity" for functions
 --- @param entries table[] list of code point entries from treesitter module
 --- @return string[] display_lines
 local function build_display_lines(entries)
   local lines = {}
   for _, entry in ipairs(entries) do
     local display = entry.display_type .. " " .. entry.name
+    if entry.arity then
+      display = display .. "/" .. entry.arity
+    end
     table.insert(lines, display)
   end
   return lines

@@ -83,6 +83,85 @@ local function get_declaration_name(node, bufnr)
   return "[unknown]"
 end
 
+--- Count the number of parameters (arity) for a function-like node.
+--- Handles function_declaration, arrow_function, function, and generator_function.
+--- @param node any treesitter node
+--- @return number|nil arity the parameter count, or nil if not a function
+local function get_arity(node)
+  local node_type = node:type()
+
+  -- Direct function declaration
+  if node_type == "function_declaration"
+    or node_type == "function"
+    or node_type == "generator_function"
+    or node_type == "generator_function_declaration"
+  then
+    local params = node:field("parameters")[1]
+    if params then
+      local count = 0
+      for child in params:iter_children() do
+        local ct = child:type()
+        -- Count actual parameter nodes, skip punctuation (, and parentheses)
+        if ct ~= "," and ct ~= "(" and ct ~= ")" then
+          count = count + 1
+        end
+      end
+      return count
+    end
+    return 0
+  end
+
+  -- Arrow function
+  if node_type == "arrow_function" then
+    local params = node:field("parameters")[1]
+    if params then
+      -- If params is an identifier (single param without parens), arity is 1
+      if params:type() == "identifier" then
+        return 1
+      end
+      -- Otherwise it's a formal_parameters node
+      local count = 0
+      for child in params:iter_children() do
+        local ct = child:type()
+        if ct ~= "," and ct ~= "(" and ct ~= ")" then
+          count = count + 1
+        end
+      end
+      return count
+    end
+    return 0
+  end
+
+  -- For lexical/variable declarations, check if the value is a function/arrow
+  if node_type == "lexical_declaration" or node_type == "variable_declaration" then
+    for child in node:iter_children() do
+      if child:type() == "variable_declarator" then
+        local value = child:field("value")[1]
+        if value then
+          local vt = value:type()
+          if vt == "arrow_function" or vt == "function" or vt == "generator_function" then
+            return get_arity(value)
+          end
+        end
+      end
+    end
+    return nil -- not a function variable
+  end
+
+  -- For export_statement, recurse into the inner declaration
+  if node_type == "export_statement" then
+    for child in node:iter_children() do
+      local child_type = child:type()
+      if DECLARATION_TYPES[child_type] and child_type ~= "export_statement" then
+        return get_arity(child)
+      end
+    end
+    return nil
+  end
+
+  return nil
+end
+
 --- Get the display type for a node (handles export wrapping).
 --- @param node any treesitter node
 --- @return string display_type
@@ -136,9 +215,12 @@ function M.get_code_points(bufnr)
       local name = get_declaration_name(child, bufnr)
       local display_type = get_display_type(child)
 
+      local arity = get_arity(child)
+
       table.insert(entries, {
         name = name,
         display_type = display_type,
+        arity = arity,
         start_row = sr,
         end_row = er,
         lines = lines,

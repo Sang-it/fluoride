@@ -80,8 +80,8 @@ end
 --- @param title string window title
 --- @return number win window handle
 local function open_centered_float(buf, title)
-  local width = math.floor(vim.o.columns * 0.6)
-  local height = math.floor(vim.o.lines * 0.6)
+  local width = math.floor(vim.o.columns * 0.8)
+  local height = math.floor(vim.o.lines * 0.8)
   local row = math.floor((vim.o.lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
 
@@ -95,12 +95,11 @@ local function open_centered_float(buf, title)
     border = "rounded",
     title = " " .. title .. " ",
     title_pos = "center",
-    footer = " :w save | q quit ",
-    footer_pos = "center",
   })
 
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
   vim.api.nvim_set_option_value("number", true, { win = win })
+  vim.api.nvim_set_option_value("relativenumber", true, { win = win })
 
   return win
 end
@@ -136,6 +135,27 @@ function M.open(source_bufnr, entries)
     buffer = buf,
     callback = function()
       apply_highlights(buf)
+    end,
+  })
+
+  -- Toggle relative line numbers based on mode and focus
+  local numbertoggle = vim.api.nvim_create_augroup("code_points_numbertoggle", { clear = true })
+  vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "InsertLeave", "WinEnter" }, {
+    group = numbertoggle,
+    buffer = buf,
+    callback = function()
+      if vim.api.nvim_win_is_valid(win) and vim.wo[win].nu and vim.fn.mode() ~= "i" then
+        vim.wo[win].rnu = true
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "BufLeave", "FocusLost", "InsertEnter", "WinLeave" }, {
+    group = numbertoggle,
+    buffer = buf,
+    callback = function()
+      if vim.api.nvim_win_is_valid(win) and vim.wo[win].nu then
+        vim.wo[win].rnu = false
+      end
     end,
   })
 

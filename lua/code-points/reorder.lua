@@ -19,23 +19,20 @@ local TYPE_PREFIXES = {
 }
 
 --- Parse a display line to extract the entry name.
---- Display format: "<type_prefix> <name> [L<line>]"
+--- Display format: "<type_prefix> <name>"
 --- We need to match back to original entries by name.
 --- @param line string the display line from the float buffer
 --- @return string|nil name the extracted name, or nil if unparseable
 local function parse_display_line(line)
-  -- Strip the trailing " [L<number>]"
-  local without_line_num = line:match("^(.+)%s+%[L%d+%]$")
-  if not without_line_num then
+  local trimmed = vim.trim(line)
+  if trimmed == "" then
     return nil
   end
 
-  without_line_num = vim.trim(without_line_num)
-
   -- Try to strip known type prefixes (longest first)
   for _, prefix in ipairs(TYPE_PREFIXES) do
-    if without_line_num:sub(1, #prefix) == prefix then
-      local rest = without_line_num:sub(#prefix + 1)
+    if trimmed:sub(1, #prefix) == prefix then
+      local rest = trimmed:sub(#prefix + 1)
       rest = vim.trim(rest)
       if rest ~= "" then
         return rest
@@ -44,7 +41,7 @@ local function parse_display_line(line)
   end
 
   -- Fallback: return everything (for expression statements or unknown types)
-  return without_line_num
+  return trimmed
 end
 
 --- Build an index mapping from entry name to entry (for fast lookup).

@@ -30,7 +30,7 @@ end
 table.sort(SORTED_PREFIXES, function(a, b) return #a > #b end)
 
 --- Apply syntax highlighting to all lines in the code points buffer.
---- Each line has the format: <type_prefix> <name> [L<line_number>]
+--- Each line has the format: <type_prefix> <name>
 --- @param buf number buffer handle
 local function apply_highlights(buf)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
@@ -55,34 +55,21 @@ local function apply_highlights(buf)
       -- Highlight the type prefix
       vim.api.nvim_buf_add_highlight(buf, ns, hl.prefix, lnum, 0, #matched_prefix)
 
-      -- Parse the rest: "<name> [L<number>]"
-      local after_prefix = line:sub(#matched_prefix + 2) -- skip prefix + space
-      local name, line_info = after_prefix:match("^(.+)%s+(%[L%d+%])$")
-
-      if name and line_info then
-        local name_start = #matched_prefix + 1 -- byte after the space
-        local name_end = name_start + #name
-
-        -- Highlight the symbol name
-        vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, name_end)
-
-        -- Highlight [L<n>] as comment
-        local info_start = name_end + 1 -- byte after the space
-        local info_end = info_start + #line_info
-        vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, info_start, info_end)
-      end
+      -- Highlight the symbol name (everything after the prefix)
+      local name_start = #matched_prefix + 1 -- byte after the space
+      vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, -1)
     end
   end
 end
 
 --- Build display lines from code point entries.
---- Format: "type name [L<line>]"
+--- Format: "type name"
 --- @param entries table[] list of code point entries from treesitter module
 --- @return string[] display_lines
 local function build_display_lines(entries)
   local lines = {}
   for _, entry in ipairs(entries) do
-    local display = entry.display_type .. " " .. entry.name .. " [L" .. (entry.start_row + 1) .. "]"
+    local display = entry.display_type .. " " .. entry.name
     table.insert(lines, display)
   end
   return lines

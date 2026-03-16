@@ -224,7 +224,7 @@ function M.open(source_bufnr, entries, lang)
         table.insert(virt_lines, { { "", "Comment" } })
       end
     end
-    table.insert(virt_lines, { { ":w=submit  q=close  gd=peek", "Comment" } })
+    table.insert(virt_lines, { { ":w=submit  q=close  gd=peek  K=hover", "Comment" } })
     vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
       virt_lines = virt_lines,
       virt_lines_above = false,
@@ -319,6 +319,30 @@ function M.open(source_bufnr, entries, lang)
       end)
     end
   end, { buffer = buf, noremap = true, silent = true, desc = "Peek at code point (gd)" })
+
+  -- Map K to show LSP hover for the code point under cursor
+  vim.keymap.set("n", "K", function()
+    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+    local map_entry = flat_map[cursor_line]
+    if not map_entry then return end
+
+    local target_row = map_entry.entry.decl_start_row + 1
+
+    local source_win = nil
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
+        source_win = w
+        break
+      end
+    end
+
+    if source_win then
+      vim.api.nvim_win_call(source_win, function()
+        vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
+        vim.lsp.buf.hover()
+      end)
+    end
+  end, { buffer = buf, noremap = true, silent = true, desc = "LSP hover for code point" })
 
   -- Handle :w — intercept the save and apply reordering + renames
   vim.api.nvim_create_autocmd("BufWriteCmd", {

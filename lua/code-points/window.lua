@@ -224,7 +224,7 @@ function M.open(source_bufnr, entries, lang)
         table.insert(virt_lines, { { "", "Comment" } })
       end
     end
-    table.insert(virt_lines, { { ":w=submit  q=close  gd=peek  K=hover", "Comment" } })
+    table.insert(virt_lines, { { ":w=submit q=close gd=peek K=hover", "Comment" } })
     vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
       virt_lines = virt_lines,
       virt_lines_above = false,

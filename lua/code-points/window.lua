@@ -307,91 +307,97 @@ function M.open(source_bufnr, entries, lang)
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = buf,
     callback = function()
-      local new_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local success, errmsg = pcall(function()
+        local new_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 
-      -- Filter out empty lines
-      local filtered = {}
-      for _, line in ipairs(new_lines) do
-        local trimmed = vim.trim(line)
-        if trimmed ~= "" then
-          table.insert(filtered, line) -- keep original line (with tree chars)
-        end
-      end
-
-      local ok, err, renames = reorder.apply(source_bufnr, entries, filtered, lang)
-      if not ok then
-        vim.notify("CodePoints: " .. (err or "unknown error"), vim.log.levels.ERROR)
-        return
-      end
-
-      vim.api.nvim_set_option_value("modified", false, { buf = buf })
-
-      -- Format via LSP if available (without closing the window)
-      local function format_source()
-        -- Find the source window to run format in its context
-        local source_win = nil
-        for _, w in ipairs(vim.api.nvim_list_wins()) do
-          if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
-            source_win = w
-            break
+        -- Filter out empty lines
+        local filtered = {}
+        for _, line in ipairs(new_lines) do
+          local trimmed = vim.trim(line)
+          if trimmed ~= "" then
+            table.insert(filtered, line) -- keep original line (with tree chars)
           end
         end
 
-        if source_win then
-          vim.api.nvim_win_call(source_win, function()
-            local clients = vim.lsp.get_clients({ bufnr = source_bufnr })
-            local has_formatter = false
-            for _, client in ipairs(clients) do
-              if client.server_capabilities.documentFormattingProvider then
-                has_formatter = true
-                break
-              end
-            end
-            if has_formatter then
-              vim.lsp.buf.format({ async = false, bufnr = source_bufnr, timeout_ms = 5000 })
-            end
-          end)
-        end
-      end
-
-      -- Refresh the code points list after changes are applied
-      local function refresh()
-        format_source()
-
-        -- Re-extract code points from the updated source buffer
-        local treesitter = require("code-points.treesitter")
-        local new_entries, _ = treesitter.get_code_points(source_bufnr)
-        if #new_entries > 0 then
-          entries = new_entries
-          local new_display_lines, new_flat_map = build_display_lines(entries)
-          flat_map = new_flat_map
-          vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
-          vim.api.nvim_set_option_value("modified", false, { buf = buf })
-          apply_highlights(buf, highlights, sorted_prefixes)
-          update_footer()
-        end
-      end
-
-      -- Apply LSP renames if any names were changed
-      if renames and #renames > 0 then
-        if not rename.has_rename_support(source_bufnr) then
-          vim.notify(
-            "CodePoints: reorder applied, but no LSP client with rename support is attached. "
-              .. #renames .. " rename(s) skipped.",
-            vim.log.levels.WARN
-          )
-          refresh()
+        local ok, err, renames = reorder.apply(source_bufnr, entries, filtered, lang)
+        if not ok then
+          vim.notify("CodePoints: " .. (err or "unknown error"), vim.log.levels.WARN)
           return
         end
 
-        vim.notify("CodePoints: reorder applied, processing " .. #renames .. " rename(s)...", vim.log.levels.INFO)
-        rename.apply_renames(source_bufnr, renames, function()
-          vim.notify("CodePoints: all renames complete", vim.log.levels.INFO)
+        vim.api.nvim_set_option_value("modified", false, { buf = buf })
+
+        -- Format via LSP if available (without closing the window)
+        local function format_source()
+          -- Find the source window to run format in its context
+          local source_win = nil
+          for _, w in ipairs(vim.api.nvim_list_wins()) do
+            if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
+              source_win = w
+              break
+            end
+          end
+
+          if source_win then
+            vim.api.nvim_win_call(source_win, function()
+              local clients = vim.lsp.get_clients({ bufnr = source_bufnr })
+              local has_formatter = false
+              for _, client in ipairs(clients) do
+                if client.server_capabilities.documentFormattingProvider then
+                  has_formatter = true
+                  break
+                end
+              end
+              if has_formatter then
+                vim.lsp.buf.format({ async = false, bufnr = source_bufnr, timeout_ms = 5000 })
+              end
+            end)
+          end
+        end
+
+        -- Refresh the code points list after changes are applied
+        local function refresh()
+          format_source()
+
+          -- Re-extract code points from the updated source buffer
+          local treesitter = require("code-points.treesitter")
+          local new_entries, _ = treesitter.get_code_points(source_bufnr)
+          if #new_entries > 0 then
+            entries = new_entries
+            local new_display_lines, new_flat_map = build_display_lines(entries)
+            flat_map = new_flat_map
+            vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+            vim.api.nvim_set_option_value("modified", false, { buf = buf })
+            apply_highlights(buf, highlights, sorted_prefixes)
+            update_footer()
+          end
+        end
+
+        -- Apply LSP renames if any names were changed
+        if renames and #renames > 0 then
+          if not rename.has_rename_support(source_bufnr) then
+            vim.notify(
+              "CodePoints: reorder applied, but no LSP client with rename support is attached. "
+                .. #renames .. " rename(s) skipped.",
+              vim.log.levels.WARN
+            )
+            refresh()
+            return
+          end
+
+          vim.notify("CodePoints: reorder applied, processing " .. #renames .. " rename(s)...", vim.log.levels.INFO)
+          rename.apply_renames(source_bufnr, renames, function()
+            vim.notify("CodePoints: all renames complete", vim.log.levels.INFO)
+            refresh()
+          end)
+        else
+          vim.notify("CodePoints: reorder applied", vim.log.levels.INFO)
           refresh()
-        end)
-      else
-        vim.notify("CodePoints: reorder applied", vim.log.levels.INFO)
-        refresh()
+        end
+      end)
+
+      if not success then
+        vim.notify("CodePoints: " .. tostring(errmsg), vim.log.levels.WARN)
       end
     end,
   })

@@ -166,6 +166,8 @@ local function open_sidebar(buf, title)
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
   vim.api.nvim_set_option_value("number", true, { win = win })
   vim.api.nvim_set_option_value("relativenumber", true, { win = win })
+  vim.api.nvim_set_option_value("winhighlight", "Normal:Normal,FloatBorder:Normal,FloatTitle:Normal", { win = win })
+  vim.api.nvim_set_option_value("winblend", 15, { win = win })
 
   return win
 end

@@ -75,7 +75,18 @@ local function build_entry(node, lang, bufnr, sr_override)
 
   local name = lang.get_name(node, bufnr)
   if not name or name == "[unknown]" then
-    name = "<L" .. (sr + 1) .. ">"
+    -- Use the first line of the node's text as a meaningful fallback
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    local first_line = text:match("^([^\n]*)")
+    -- Strip the display_type keyword from the start to avoid duplication
+    local display_type = lang.get_display_type(node, bufnr)
+    if first_line:sub(1, #display_type) == display_type then
+      first_line = vim.trim(first_line:sub(#display_type + 1))
+    end
+    if #first_line > 40 then
+      first_line = first_line:sub(1, 37) .. "..."
+    end
+    name = first_line ~= "" and first_line or "<L" .. (sr + 1) .. ">"
   end
 
   return {

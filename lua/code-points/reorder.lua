@@ -76,6 +76,13 @@ local function parse_display_content(content, type_prefixes)
     end
   end
 
+  -- Fallback: split at the first space to handle unrecognized display types
+  -- e.g., "if (condition)" → prefix="if", name="(condition)"
+  local fallback_prefix, fallback_rest = trimmed:match("^(%S+)%s+(.+)$")
+  if fallback_prefix and fallback_rest then
+    return fallback_prefix, strip_arity(fallback_rest)
+  end
+
   return nil, strip_arity(trimmed)
 end
 

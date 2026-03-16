@@ -39,6 +39,12 @@ M.highlights = {
   ["expression"]       = { prefix = "Keyword",  name = "Identifier" },
   ["method"]           = { prefix = "Keyword",  name = "Function" },
   ["field"]            = { prefix = "Keyword",  name = "Identifier" },
+  ["if"]               = { prefix = "Keyword",  name = "Identifier" },
+  ["while"]            = { prefix = "Keyword",  name = "Identifier" },
+  ["for"]              = { prefix = "Keyword",  name = "Identifier" },
+  ["switch"]           = { prefix = "Keyword",  name = "Identifier" },
+  ["try"]              = { prefix = "Keyword",  name = "Identifier" },
+  ["do"]               = { prefix = "Keyword",  name = "Identifier" },
 }
 
 function M.is_declaration(node)
@@ -87,6 +93,30 @@ function M.get_name(node, bufnr)
     if #first_line > 40 then
       first_line = first_line:sub(1, 37) .. "..."
     end
+    return first_line
+  end
+
+  -- Statement types: extract the condition/header
+  if node_type == "if_statement"
+    or node_type == "while_statement"
+    or node_type == "for_statement"
+    or node_type == "for_in_statement"
+    or node_type == "switch_statement"
+    or node_type == "try_statement"
+    or node_type == "do_statement"
+  then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    local first_line = text:match("^([^\n]*)")
+    local keyword = node_type:match("^(%w+)_statement$") or node_type
+    if first_line:sub(1, #keyword) == keyword then
+      first_line = vim.trim(first_line:sub(#keyword + 1))
+    end
+    first_line = first_line:gsub("[{:]%s*$", "")
+    first_line = vim.trim(first_line)
+    if #first_line > 40 then
+      first_line = first_line:sub(1, 37) .. "..."
+    end
+    if first_line == "" then return nil end
     return first_line
   end
 
@@ -141,6 +171,20 @@ function M.get_display_type(node, bufnr)
   -- Class members
   if node_type == "method_definition" then return "method" end
   if node_type == "field_definition" then return "field" end
+
+  -- Statement types
+  local STATEMENT_MAP = {
+    if_statement = "if",
+    while_statement = "while",
+    for_statement = "for",
+    for_in_statement = "for",
+    switch_statement = "switch",
+    try_statement = "try",
+    do_statement = "do",
+  }
+  if STATEMENT_MAP[node_type] then
+    return STATEMENT_MAP[node_type]
+  end
 
   return DECLARATION_TYPES[node_type] or node_type
 end

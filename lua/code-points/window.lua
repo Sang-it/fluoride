@@ -99,25 +99,42 @@ local function apply_highlights(buf, highlights, sorted_prefixes)
       end
     end
 
+    local hl_prefix_group, hl_name_group
+    local prefix_len
+
     if matched_prefix then
       local hl = highlights[matched_prefix]
+      hl_prefix_group = hl.prefix
+      hl_name_group = hl.name
+      prefix_len = #matched_prefix
+    else
+      -- Fallback: split at first space for unrecognized display types
+      local fallback_prefix = content:match("^(%S+)%s")
+      if fallback_prefix then
+        hl_prefix_group = "Keyword"
+        hl_name_group = "Identifier"
+        prefix_len = #fallback_prefix
+      end
+    end
+
+    if prefix_len then
       local prefix_start = content_start
-      local prefix_end = content_start + #matched_prefix
+      local prefix_end = content_start + prefix_len
 
       -- Highlight the type prefix
-      vim.api.nvim_buf_add_highlight(buf, ns, hl.prefix, lnum, prefix_start, prefix_end)
+      vim.api.nvim_buf_add_highlight(buf, ns, hl_prefix_group, lnum, prefix_start, prefix_end)
 
       -- Highlight the symbol name and arity
-      local after_prefix = content:sub(#matched_prefix + 2)
+      local after_prefix = content:sub(prefix_len + 2)
       local name_start = prefix_end + 1 -- after the space
 
       local name_part, arity_part = after_prefix:match("^(.+)(/%d+)$")
       if name_part and arity_part then
         local name_end = name_start + #name_part
-        vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, name_end)
+        vim.api.nvim_buf_add_highlight(buf, ns, hl_name_group, lnum, name_start, name_end)
         vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, name_end, name_end + #arity_part)
       else
-         vim.api.nvim_buf_add_highlight(buf, ns, hl.name, lnum, name_start, -1)
+        vim.api.nvim_buf_add_highlight(buf, ns, hl_name_group, lnum, name_start, -1)
       end
     end
     ::continue::

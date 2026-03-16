@@ -27,6 +27,11 @@ M.highlights = {
   ["local"]          = { prefix = "Keyword",  name = "Identifier" },
   ["variable"]       = { prefix = "Keyword",  name = "Identifier" },
   ["call"]           = { prefix = "Keyword",  name = "Function" },
+  ["if"]             = { prefix = "Keyword",  name = "Identifier" },
+  ["while"]          = { prefix = "Keyword",  name = "Identifier" },
+  ["for"]            = { prefix = "Keyword",  name = "Identifier" },
+  ["do"]             = { prefix = "Keyword",  name = "Identifier" },
+  ["repeat"]         = { prefix = "Keyword",  name = "Identifier" },
 }
 
 function M.is_declaration(node)
@@ -103,6 +108,31 @@ function M.get_name(node, bufnr)
     return first_line
   end
 
+  -- Statement types: extract the condition/header
+  if node_type == "if_statement"
+    or node_type == "while_statement"
+    or node_type == "for_statement"
+    or node_type == "for_in_statement"
+    or node_type == "do_statement"
+    or node_type == "repeat_statement"
+  then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    local first_line = text:match("^([^\n]*)")
+    local keyword = node_type:match("^(%w+)_statement$") or node_type
+    if first_line:sub(1, #keyword) == keyword then
+      first_line = vim.trim(first_line:sub(#keyword + 1))
+    end
+    -- Strip trailing "then", "do"
+    first_line = first_line:gsub("%s+then%s*$", "")
+    first_line = first_line:gsub("%s+do%s*$", "")
+    first_line = vim.trim(first_line)
+    if #first_line > 40 then
+      first_line = first_line:sub(1, 37) .. "..."
+    end
+    if first_line == "" then return nil end
+    return first_line
+  end
+
   return "[unknown]"
 end
 
@@ -120,6 +150,19 @@ function M.get_display_type(node, bufnr)
 
   if node_type == "variable_declaration" then
     return "local"
+  end
+
+  -- Statement types
+  local STATEMENT_MAP = {
+    if_statement = "if",
+    while_statement = "while",
+    for_statement = "for",
+    for_in_statement = "for",
+    do_statement = "do",
+    repeat_statement = "repeat",
+  }
+  if STATEMENT_MAP[node_type] then
+    return STATEMENT_MAP[node_type]
   end
 
   return DECLARATION_TYPES[node_type] or node_type

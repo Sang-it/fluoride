@@ -295,6 +295,7 @@ function M.open(source_bufnr, entries, lang)
   end, { buffer = buf, noremap = true, silent = true, desc = "Jump to code point" })
 
   -- Map gd to peek at the code point (scroll source buffer without leaving)
+  local peek_ns = vim.api.nvim_create_namespace("code_points_peek")
   vim.keymap.set("n", "gd", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1] -- 1-indexed
     local map_entry = flat_map[cursor_line]
@@ -312,11 +313,24 @@ function M.open(source_bufnr, entries, lang)
     end
 
     if source_win then
-      -- Move the cursor and scroll so the code point is at the top of the source window
+      -- Center the code point in the source window
       vim.api.nvim_win_call(source_win, function()
         vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
         vim.cmd("normal! zz")
       end)
+
+      -- Highlight the full code point range temporarily
+      vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
+      for row = map_entry.entry.start_row, map_entry.entry.end_row do
+        vim.api.nvim_buf_add_highlight(source_bufnr, peek_ns, "Visual", row, 0, -1)
+      end
+
+      -- Clear highlight after 200ms
+      vim.defer_fn(function()
+        if vim.api.nvim_buf_is_valid(source_bufnr) then
+          vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
+        end
+      end, 200)
     end
   end, { buffer = buf, noremap = true, silent = true, desc = "Peek at code point (gd)" })
 

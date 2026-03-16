@@ -230,7 +230,11 @@ function M.open(source_bufnr, entries, lang, config)
         table.insert(virt_lines, { { "", "Comment" } })
       end
     end
-    table.insert(virt_lines, { { ":w=submit q=close gd=peek K=hover", "Comment" } })
+    local parts = { ":w=submit" }
+    if km.close ~= false then table.insert(parts, (km.close or "q") .. "=close") end
+    if km.peek ~= false then table.insert(parts, (km.peek or "gd") .. "=peek") end
+    if km.hover ~= false then table.insert(parts, (km.hover or "K") .. "=hover") end
+    table.insert(virt_lines, { { table.concat(parts, " "), "Comment" } })
     vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
       virt_lines = virt_lines,
       virt_lines_above = false,
@@ -268,6 +272,19 @@ function M.open(source_bufnr, entries, lang, config)
     end,
   })
 
+  -- Keymap configuration
+  local km = config and config.keymaps or {}
+
+  -- Helper: find the source window
+  local function find_source_win()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
+        return w
+      end
+    end
+    return nil
+  end
+
   -- Close window helper
   local function close()
     if vim.api.nvim_win_is_valid(win) then
@@ -275,96 +292,71 @@ function M.open(source_bufnr, entries, lang, config)
     end
   end
 
-  -- Map 'q' and <C-c> to close the window (normal mode)
-  vim.keymap.set("n", "q", close, { buffer = buf, noremap = true, silent = true, desc = "Close Code Points window" })
-  vim.keymap.set("n", "<C-c>", close, { buffer = buf, noremap = true, silent = true, desc = "Close Code Points window" })
+  -- Register keymaps (skip if set to false)
+  local function map(key, fn, desc)
+    if key ~= false then
+      vim.keymap.set("n", key, fn, { buffer = buf, noremap = true, silent = true, desc = desc })
+    end
+  end
 
-  -- Map <CR> to jump to the code point under cursor (without closing the window)
-  vim.keymap.set("n", "<CR>", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1] -- 1-indexed
+  -- Close
+  map(km.close or "q", close, "Close Code Points window")
+  map(km.close_alt or "<C-c>", close, "Close Code Points window")
+
+  -- Jump to code point
+  map(km.jump or "<CR>", function()
+    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
     if not map_entry then return end
 
-    local target_row = map_entry.entry.start_row + 1 -- 1-indexed
-
-    -- Find the window displaying the source buffer
-    local source_win = nil
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
-        source_win = w
-        break
-      end
-    end
-
+    local source_win = find_source_win()
     if source_win then
-      -- Switch focus to source window and jump to the code point
+      local target_row = map_entry.entry.start_row + 1
       vim.api.nvim_set_current_win(source_win)
       vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
       vim.fn.winrestview({ topline = target_row })
     end
-  end, { buffer = buf, noremap = true, silent = true, desc = "Jump to code point" })
+  end, "Jump to code point")
 
-  -- Map gd to peek at the code point (scroll source buffer without leaving)
+  -- Peek at code point
   local peek_ns = vim.api.nvim_create_namespace("code_points_peek")
-  vim.keymap.set("n", "gd", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1] -- 1-indexed
+  map(km.peek or "gd", function()
+    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
     if not map_entry then return end
 
-    local target_row = map_entry.entry.start_row + 1 -- 1-indexed
-
-    -- Find the window displaying the source buffer
-    local source_win = nil
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
-        source_win = w
-        break
-      end
-    end
-
+    local source_win = find_source_win()
     if source_win then
-      -- Center the code point in the source window
+      local target_row = map_entry.entry.start_row + 1
       vim.api.nvim_win_call(source_win, function()
         vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
         vim.cmd("normal! zz")
       end)
 
-      -- Highlight the full code point range temporarily
       vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
       for row = map_entry.entry.start_row, map_entry.entry.end_row do
         vim.api.nvim_buf_add_highlight(source_bufnr, peek_ns, "Visual", row, 0, -1)
       end
 
-      -- Clear highlight after 200ms
       vim.defer_fn(function()
         if vim.api.nvim_buf_is_valid(source_bufnr) then
           vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
         end
       end, 200)
     end
-  end, { buffer = buf, noremap = true, silent = true, desc = "Peek at code point (gd)" })
+  end, "Peek at code point")
 
-  -- Map K to show LSP hover for the code point under cursor
-  vim.keymap.set("n", "K", function()
+  -- LSP hover
+  map(km.hover or "K", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
     if not map_entry then return end
 
-    local target_row = map_entry.entry.decl_start_row + 1
-
-    local source_win = nil
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
-        source_win = w
-        break
-      end
-    end
-
+    local source_win = find_source_win()
     if source_win then
-      -- Focus source window, position cursor on the symbol name, trigger hover
+      local target_row = map_entry.entry.decl_start_row + 1
       vim.api.nvim_set_current_win(source_win)
 
-      -- Find the column of the symbol name on the declaration line
       local name = map_entry.entry.name
       local decl_line = vim.api.nvim_buf_get_lines(source_bufnr, target_row - 1, target_row, false)[1] or ""
       local col = 0
@@ -372,14 +364,14 @@ function M.open(source_bufnr, entries, lang, config)
         local pattern = "%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]"
         local found = decl_line:find(pattern)
         if found then
-          col = found - 1 -- 0-indexed
+          col = found - 1
         end
       end
 
       vim.api.nvim_win_set_cursor(source_win, { target_row, col })
       vim.lsp.buf.hover()
     end
-  end, { buffer = buf, noremap = true, silent = true, desc = "LSP hover for code point" })
+  end, "LSP hover for code point")
 
   -- Handle :w — intercept the save and apply reordering + renames
   vim.api.nvim_create_autocmd("BufWriteCmd", {

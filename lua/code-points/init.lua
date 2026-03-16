@@ -11,6 +11,13 @@ local DEFAULT_CONFIG = {
     winblend = 15,
     footer = true,
   },
+  keymaps = {
+    close = "q",
+    close_alt = "<C-c>",
+    jump = "<CR>",
+    peek = "gd",
+    hover = "K",
+  },
 }
 
 M.config = vim.deepcopy(DEFAULT_CONFIG)

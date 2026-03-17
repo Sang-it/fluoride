@@ -1,10 +1,10 @@
-# code-points.nvim
+# fluoride.nvim
 
 A Neovim plugin that lets you view, reorder, and rename top-level code declarations through a floating window. Powered by Treesitter and LSP.
 
 ## Features
 
-- **View** all top-level code points (functions, classes, variables, types, etc.) in a centered floating window
+- **View** all top-level declarations (functions, classes, variables, types, etc.) in a floating window
 - **Reorder** declarations by moving lines in the float — saves back to the source file on `:w`
 - **Rename** symbols by editing names in the float — triggers LSP rename across your project
 - **Jump** to any code point by pressing `<CR>` on its line
@@ -36,9 +36,9 @@ A Neovim plugin that lets you view, reorder, and rename top-level code declarati
 
 ```lua
 {
-  "Sang-it/code-points",
+  "Sang-it/fluoride",
   config = function()
-    require("code-points").setup()
+    require("fluoride").setup()
   end,
 }
 ```
@@ -48,27 +48,27 @@ A Neovim plugin that lets you view, reorder, and rename top-level code declarati
 Clone this repo and add it to your runtimepath:
 
 ```vim
-set runtimepath+=~/path/to/code-points
+set runtimepath+=~/path/to/fluoride
 ```
 
 ## Usage
 
 ```vim
-:CodePoints
+:Fluoride
 ```
 
 Or map it to a keybinding:
 
 ```lua
-vim.keymap.set("n", "<leader>cp", "<cmd>CodePoints<cr>", { desc = "Open Code Points" })
+vim.keymap.set("n", "<leader>cp", "<cmd>Fluoride<cr>", { desc = "Open Fluoride" })
 ```
 
 ### Configuration
 
 ```lua
-require("code-points").setup({
+require("fluoride").setup({
   window = {
-    title = "Code Points",    -- string or false to disable
+    title = "Fluoride",        -- string or false to disable
     width = 0.3,              -- proportion of terminal width (0-1)
     height = 0.85,            -- proportion of terminal height (0-1)
     row = 2,                  -- fixed rows from top edge
@@ -127,7 +127,7 @@ border = {
 
 ### Workflow
 
-1. Open a supported file and run `:CodePoints`
+1. Open a supported file and run `:Fluoride`
 2. A floating window appears listing all top-level declarations:
    ```
    const MAX_RETRIES
@@ -143,7 +143,7 @@ border = {
 
 ## Adding Language Support
 
-Create a file at `lua/code-points/langs/<filetype>.lua` that exports:
+Create a file at `lua/fluoride/langs/<filetype>.lua` that exports:
 
 ```lua
 local M = {}

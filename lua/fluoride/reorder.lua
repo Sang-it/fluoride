@@ -1,4 +1,4 @@
-local diff = require("code-points.diff")
+local diff = require("fluoride.diff")
 
 local M = {}
 
@@ -7,7 +7,7 @@ local CHILD_PREFIX = "  • "
 local CHILD_PREFIX_LEN = #CHILD_PREFIX
 
 --- Build a sorted list of type prefixes from a lang's highlights table.
---- @param lang CodePointsLang the language module
+--- @param lang FluorideLang the language module
 --- @return string[] type_prefixes
 local function build_type_prefixes(lang)
   local prefixes = {}
@@ -277,7 +277,7 @@ end
 --- @param source_bufnr number the source buffer handle
 --- @param original_entries table[] the original code point entries
 --- @param new_display_lines string[] the reordered/edited display lines from the float
---- @param lang CodePointsLang the language module
+--- @param lang FluorideLang the language module
 --- @return boolean ok
 --- @return string|nil error
 --- @return table[] renames list of { old_name: string, new_name: string }

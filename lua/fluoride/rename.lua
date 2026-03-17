@@ -64,7 +64,7 @@ function M.apply_renames(bufnr, renames, on_done)
 
     if not line or not col then
       vim.notify(
-        "CodePoints: could not find symbol '" .. old_name .. "' for rename",
+        "Fluoride: could not find symbol '" .. old_name .. "' for rename",
         vim.log.levels.WARN
       )
       -- Continue with next rename
@@ -83,7 +83,7 @@ function M.apply_renames(bufnr, renames, on_done)
     vim.lsp.buf_request(bufnr, "textDocument/rename", params, function(err, result, ctx)
       if err then
         vim.notify(
-          "CodePoints: LSP rename failed for '" .. old_name .. "': " .. tostring(err.message or err),
+          "Fluoride: LSP rename failed for '" .. old_name .. "': " .. tostring(err.message or err),
           vim.log.levels.ERROR
         )
       elseif result then
@@ -91,7 +91,7 @@ function M.apply_renames(bufnr, renames, on_done)
         local encoding = client and client.offset_encoding or "utf-16"
         vim.lsp.util.apply_workspace_edit(result, encoding)
         vim.notify(
-          "CodePoints: renamed '" .. old_name .. "' -> '" .. new_name .. "'",
+          "Fluoride: renamed '" .. old_name .. "' -> '" .. new_name .. "'",
           vim.log.levels.INFO
         )
       end

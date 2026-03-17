@@ -3,9 +3,10 @@ from typing import Optional
 import asyncio
 import json
 
-TIMEOUT_SECONDS = 30.0
-
 MAX_RETRIES = 3
+
+
+TIMEOUT_SECONDS = 30.0
 
 
 @dataclass

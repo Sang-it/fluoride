@@ -2,7 +2,7 @@ local M = {}
 
 local DEFAULT_CONFIG = {
   window = {
-    title = "Code Points",
+    title = "Fluoride",
     width = 0.3,
     height = 0.85,
     row = 2,
@@ -29,10 +29,10 @@ function M.setup(user_config)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULT_CONFIG), user_config or {})
 end
 
---- Open the code points floating window for the current buffer.
+--- Open the Fluoride floating window for the current buffer.
 function M.run()
   local source_bufnr = vim.api.nvim_get_current_buf()
-  local treesitter = require("code-points.treesitter")
+  local treesitter = require("fluoride.treesitter")
 
   local entries, lang = treesitter.get_code_points(source_bufnr)
 
@@ -41,11 +41,11 @@ function M.run()
   end
 
   if #entries == 0 then
-    vim.notify("CodePoints: no top-level declarations found", vim.log.levels.INFO)
+    vim.notify("Fluoride: no top-level declarations found", vim.log.levels.INFO)
     return
   end
 
-  local window = require("code-points.window")
+  local window = require("fluoride.window")
   window.open(source_bufnr, entries, lang, M.config)
 end
 

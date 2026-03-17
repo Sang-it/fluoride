@@ -1,9 +1,9 @@
-local reorder = require("code-points.reorder")
-local rename = require("code-points.rename")
+local reorder = require("fluoride.reorder")
+local rename = require("fluoride.rename")
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("code_points_hl")
+local ns = vim.api.nvim_create_namespace("fluoride_hl")
 
 -- Child indentation
 local CHILD_PREFIX = "  • " -- 2 spaces + bullet + space
@@ -56,7 +56,7 @@ local function build_display_lines(entries)
   return lines, flat_map
 end
 
---- Apply syntax highlighting to all lines in the code points buffer.
+--- Apply syntax highlighting to all lines in the fluoride buffer.
 --- Handles both top-level lines and indented child lines with tree chars.
 --- @param buf number buffer handle
 --- @param highlights table<string, table> map of display_type → { prefix, name }
@@ -179,7 +179,7 @@ local function open_sidebar(buf, win_config)
   }
 
   if win_config.title ~= false then
-    win_opts.title = " " .. (win_config.title or "Code Points") .. " "
+    win_opts.title = " " .. (win_config.title or "Fluoride") .. " "
     win_opts.title_pos = "center"
   end
 
@@ -194,17 +194,17 @@ local function open_sidebar(buf, win_config)
   return win
 end
 
--- Track the current code points window
+-- Track the current Fluoride window
 local active_win = nil
 local active_buf = nil
 
---- Open the code points floating window.
+--- Open the Fluoride floating window.
 --- @param source_bufnr number the source buffer to operate on
 --- @param entries table[] list of code point entries from treesitter module
---- @param lang CodePointsLang the language module
+--- @param lang FluorideLang the language module
 --- @param config table plugin configuration
 function M.open(source_bufnr, entries, lang, config)
-  -- If a code points window is already open, focus it
+  -- If a Fluoride window is already open, focus it
   if active_win and vim.api.nvim_win_is_valid(active_win) then
     vim.api.nvim_set_current_win(active_win)
     return
@@ -228,7 +228,7 @@ function M.open(source_bufnr, entries, lang, config)
   vim.api.nvim_set_option_value("modified", false, { buf = buf })
 
   -- Give it a name so :w doesn't complain about no file name
-  vim.api.nvim_buf_set_name(buf, "code-points://reorder")
+  vim.api.nvim_buf_set_name(buf, "fluoride://reorder")
 
   -- Open the sidebar
   local win_config = config and config.window or {}
@@ -239,7 +239,7 @@ function M.open(source_bufnr, entries, lang, config)
 
   -- Add help footer at the bottom of the window (if enabled)
   local show_footer = win_config.footer ~= false
-  local footer_ns = vim.api.nvim_create_namespace("code_points_footer")
+  local footer_ns = vim.api.nvim_create_namespace("fluoride_footer")
   local function update_footer()
     vim.api.nvim_buf_clear_namespace(buf, footer_ns, 0, -1)
     if not show_footer then return end
@@ -274,7 +274,7 @@ function M.open(source_bufnr, entries, lang, config)
   })
 
   -- Toggle relative line numbers based on mode and focus
-  local numbertoggle = vim.api.nvim_create_augroup("code_points_numbertoggle", { clear = true })
+  local numbertoggle = vim.api.nvim_create_augroup("fluoride_numbertoggle", { clear = true })
   vim.api.nvim_create_autocmd({ "BufEnter", "FocusGained", "InsertLeave", "WinEnter" }, {
     group = numbertoggle,
     buffer = buf,
@@ -322,8 +322,8 @@ function M.open(source_bufnr, entries, lang, config)
   end
 
   -- Close
-  map(km.close or "q", close, "Close Code Points window")
-  map(km.close_alt or "<C-c>", close, "Close Code Points window")
+  map(km.close or "q", close, "Close Fluoride window")
+  map(km.close_alt or "<C-c>", close, "Close Fluoride window")
 
   -- Jump to code point
   map(km.jump or "<CR>", function()
@@ -341,7 +341,7 @@ function M.open(source_bufnr, entries, lang, config)
   end, "Jump to code point")
 
   -- Peek at code point
-  local peek_ns = vim.api.nvim_create_namespace("code_points_peek")
+  local peek_ns = vim.api.nvim_create_namespace("fluoride_peek")
   map(km.peek or "gd", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
@@ -413,7 +413,7 @@ function M.open(source_bufnr, entries, lang, config)
 
         local ok, err, renames = reorder.apply(source_bufnr, entries, filtered, lang)
         if not ok then
-          vim.notify("CodePoints: " .. (err or "unknown error"), vim.log.levels.WARN)
+          vim.notify("Fluoride: " .. (err or "unknown error"), vim.log.levels.WARN)
           return
         end
 
@@ -447,13 +447,13 @@ function M.open(source_bufnr, entries, lang, config)
           end
         end
 
-        -- Refresh the code points list after changes are applied
+        -- Refresh the Fluoride list after changes are applied
         local function refresh()
           format_source()
 
-          -- Re-extract code points from the updated source buffer
-          local treesitter = require("code-points.treesitter")
-          local new_entries, _ = treesitter.get_code_points(source_bufnr)
+          -- Re-extract declarations from the updated source buffer
+          local treesitter = require("fluoride.treesitter")
+          local new_entries, _ = treesitter.get_fluoride(source_bufnr)
           if #new_entries > 0 then
             entries = new_entries
             local new_display_lines, new_flat_map = build_display_lines(entries)
@@ -469,7 +469,7 @@ function M.open(source_bufnr, entries, lang, config)
         if renames and #renames > 0 then
           if not rename.has_rename_support(source_bufnr) then
             vim.notify(
-              "CodePoints: reorder applied, but no LSP client with rename support is attached. "
+              "Fluoride: reorder applied, but no LSP client with rename support is attached. "
                 .. #renames .. " rename(s) skipped.",
               vim.log.levels.WARN
             )
@@ -477,19 +477,19 @@ function M.open(source_bufnr, entries, lang, config)
             return
           end
 
-          vim.notify("CodePoints: reorder applied, processing " .. #renames .. " rename(s)...", vim.log.levels.INFO)
+          vim.notify("Fluoride: reorder applied, processing " .. #renames .. " rename(s)...", vim.log.levels.INFO)
           rename.apply_renames(source_bufnr, renames, function()
-            vim.notify("CodePoints: all renames complete", vim.log.levels.INFO)
+            vim.notify("Fluoride: all renames complete", vim.log.levels.INFO)
             refresh()
           end)
         else
-          vim.notify("CodePoints: reorder applied", vim.log.levels.INFO)
+          vim.notify("Fluoride: reorder applied", vim.log.levels.INFO)
           refresh()
         end
       end)
 
       if not success then
-        vim.notify("CodePoints: " .. tostring(errmsg), vim.log.levels.WARN)
+        vim.notify("Fluoride: " .. tostring(errmsg), vim.log.levels.WARN)
       end
     end,
   })
@@ -503,7 +503,7 @@ function M.open(source_bufnr, entries, lang, config)
   -- Centered mode: recalculate proportionally.
   local sidebar_width = math.floor(vim.o.columns * win_config.width)
   local sidebar_height = math.floor(vim.o.lines * win_config.height)
-  local resize_group = vim.api.nvim_create_augroup("code_points_resize", { clear = true })
+  local resize_group = vim.api.nvim_create_augroup("fluoride_resize", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = resize_group,
     callback = function()

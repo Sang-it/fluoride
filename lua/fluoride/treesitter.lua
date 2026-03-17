@@ -1,7 +1,7 @@
 local M = {}
 
 --- Registry of language modules, keyed by filetype.
---- @type table<string, CodePointsLang>
+--- @type table<string, FluorideLang>
 local lang_registry = {}
 
 --- Filetype aliases for auto-loading (e.g., typescriptreact → typescript module).
@@ -11,7 +11,7 @@ local FT_ALIASES = {
 }
 
 --- Register a language module for all its filetypes.
---- @param lang_module CodePointsLang
+--- @param lang_module FluorideLang
 function M.register(lang_module)
   for _, ft in ipairs(lang_module.filetypes) do
     lang_registry[ft] = lang_module
@@ -20,7 +20,7 @@ end
 
 --- Get the language module for a filetype, with lazy auto-loading.
 --- @param ft string Neovim filetype
---- @return CodePointsLang|nil
+--- @return FluorideLang|nil
 function M.get_lang(ft)
   -- Return from registry if already loaded
   if lang_registry[ft] then
@@ -34,7 +34,7 @@ function M.get_lang(ft)
   end
 
   for _, name in ipairs(names_to_try) do
-    local ok, lang = pcall(require, "code-points.langs." .. name)
+    local ok, lang = pcall(require, "fluoride.langs." .. name)
     if ok and lang and lang.filetypes then
       M.register(lang)
       if lang_registry[ft] then
@@ -62,7 +62,7 @@ end
 
 --- Build a single entry from a treesitter node.
 --- @param node any treesitter node
---- @param lang CodePointsLang language module
+--- @param lang FluorideLang language module
 --- @param bufnr number buffer handle
 --- @param sr_override number|nil optional start_row override (when comments are attached)
 --- @return table entry
@@ -139,7 +139,7 @@ end
 
 --- Process a list of sibling nodes into entries, attaching leading comments.
 --- @param siblings table[] list of sibling treesitter nodes
---- @param lang CodePointsLang language module
+--- @param lang FluorideLang language module
 --- @param bufnr number buffer handle
 --- @param is_decl_fn fun(node): boolean function to check if a node is a declaration
 --- @return table[] entries
@@ -162,15 +162,15 @@ local function process_siblings(siblings, lang, bufnr, is_decl_fn)
   return entries
 end
 
---- Extract all top-level code points from a buffer using the appropriate language module.
+--- Extract all top-level declarations from a buffer using the appropriate language module.
 --- @param bufnr number buffer handle
 --- @return table[] entries list of entries (with optional children)
---- @return CodePointsLang|nil lang the language module used
+--- @return FluorideLang|nil lang the language module used
 function M.get_code_points(bufnr)
   local ft = vim.bo[bufnr].filetype
   local lang = M.get_lang(ft)
   if not lang then
-    vim.notify("CodePoints: unsupported filetype: " .. ft, vim.log.levels.WARN)
+    vim.notify("Fluoride: unsupported filetype: " .. ft, vim.log.levels.WARN)
     return {}, nil
   end
 
@@ -179,13 +179,13 @@ function M.get_code_points(bufnr)
 
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr, parser_name)
   if not ok or not parser then
-    vim.notify("CodePoints: failed to get treesitter parser for " .. parser_name, vim.log.levels.ERROR)
+    vim.notify("Fluoride: failed to get treesitter parser for " .. parser_name, vim.log.levels.ERROR)
     return {}, lang
   end
 
   local tree = parser:parse()[1]
   if not tree then
-    vim.notify("CodePoints: failed to parse buffer", vim.log.levels.ERROR)
+    vim.notify("Fluoride: failed to parse buffer", vim.log.levels.ERROR)
     return {}, lang
   end
 

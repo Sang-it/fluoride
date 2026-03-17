@@ -3,7 +3,7 @@ use std::fmt;
 
 const MAX_ITEMS: usize = 1000;
 
-static APP_NAME: &str = "code-points-example";
+static APP_NAME: &str = "fluoride-example";
 
 pub enum Status {
     Active,

@@ -11,7 +11,7 @@ M.parsers = {
 M.comment_types = { comment = true }
 M.comment_prefix = "//"
 
--- Node types we consider as reorderable code points
+-- Node types we consider as reorderable declarations
 local DECLARATION_TYPES = {
   function_declaration = "function",
   lexical_declaration = "variable",

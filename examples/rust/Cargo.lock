@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "code-points-rust-example"
+name = "fluoride-rust-example"
 version = "0.1.0"

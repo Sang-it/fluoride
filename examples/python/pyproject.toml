@@ -1,4 +1,4 @@
 [project]
-name = "code-points-python-example"
+name = "fluoride-python-example"
 version = "1.0.0"
 requires-python = ">=3.10"

@@ -2,6 +2,10 @@
 
 A Neovim plugin that lets you view, reorder, and rename top-level code declarations through a floating window. Powered by Treesitter and LSP.
 
+## Demo
+
+<video src="https://github.com/Sang-it/fluoride/raw/main/assets/demo.mp4" controls width="100%"></video>
+
 ## Features
 
 - **View** all top-level declarations (functions, classes, variables, types, etc.) in a floating window

@@ -420,7 +420,11 @@ function M.open(source_bufnr, entries, lang, config)
 
           local names = {}
           for _, d in ipairs(deletions) do
-            table.insert(names, d.display_type .. " " .. d.name)
+            local label = d.display_type .. " " .. d.name
+            if d.parent_name then
+              label = label .. " (in " .. d.parent_name .. ")"
+            end
+            table.insert(names, label)
           end
 
           if not confirm_delete then

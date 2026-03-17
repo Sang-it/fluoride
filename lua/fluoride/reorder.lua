@@ -190,22 +190,24 @@ end
 --- Decomposes the parent into header/children/footer and reassembles.
 --- Preserves gaps between children (which may contain comments).
 --- @param parent table the original parent entry
---- @param ordered_children table[] children in new order
+--- @param ordered_children table[] children in new order (filtered, may exclude deleted)
 --- @param child_matched table map of new_child_index → original_child_index
 --- @param child_groups table[]|nil parsed child groups with new_comments
 --- @param lang_prefix string|nil the language's native comment prefix
+--- @param active_orig_children table[]|nil the filtered original children (after deletions). If nil, uses parent.children.
 --- @return string[] new_lines
-local function reconstruct_parent(parent, ordered_children, child_matched, child_groups, lang_prefix)
+local function reconstruct_parent(parent, ordered_children, child_matched, child_groups, lang_prefix, active_orig_children)
   if not ordered_children or #ordered_children == 0 then
     return parent.lines
   end
 
-  local orig_children = parent.children
+  local all_orig_children = parent.children
+  local orig_children = active_orig_children or all_orig_children
 
-  -- Find the earliest and latest child rows in the ORIGINAL ordering
+  -- Find the earliest and latest child rows in the FULL original ordering
   local min_child_row = parent.end_row
   local max_child_row = parent.start_row
-  for _, child in ipairs(orig_children) do
+  for _, child in ipairs(all_orig_children) do
     if child.start_row < min_child_row then
       min_child_row = child.start_row
     end
@@ -226,7 +228,23 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     table.insert(footer, parent.lines[row - parent.start_row + 1])
   end
 
-  -- Collect trailing gaps between consecutive children (in original order)
+  -- Build a set of deleted child row ranges (for gap filtering)
+  local deleted_child_rows = {}
+  if orig_children ~= all_orig_children then
+    local surviving = {}
+    for _, child in ipairs(orig_children) do
+      surviving[child.start_row] = true
+    end
+    for _, child in ipairs(all_orig_children) do
+      if not surviving[child.start_row] then
+        for row = child.start_row, child.end_row do
+          deleted_child_rows[row] = true
+        end
+      end
+    end
+  end
+
+  -- Collect trailing gaps between consecutive FILTERED children
   local child_trailing_gaps = {}
   for i = 1, #orig_children do
     child_trailing_gaps[i] = {}
@@ -235,7 +253,9 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
       local gap_end = orig_children[i + 1].start_row - 1
       if gap_end >= gap_start then
         for row = gap_start, gap_end do
-          table.insert(child_trailing_gaps[i], parent.lines[row - parent.start_row + 1])
+          if not deleted_child_rows[row] then
+            table.insert(child_trailing_gaps[i], parent.lines[row - parent.start_row + 1])
+          end
         end
       end
     end
@@ -499,13 +519,44 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     if not entry_copy.is_duplicate and orig_entry and orig_entry.children and #orig_entry.children > 0 then
       local orig_children = orig_entry.children
 
-      -- Deletions of children not allowed
-      if #group.children < #orig_children then
-        return false, "child entries were removed in '" .. orig_entry.name .. "': expected at least " .. #orig_children .. ", got " .. #group.children, {}, nil
-      end
-
       -- Match children
       local child_matched, child_err = match_entries(group.children, orig_children)
+
+      -- Detect child deletions
+      if #group.children < #orig_children then
+        local matched_child_originals = {}
+        for _, orig_idx in pairs(child_matched) do
+          matched_child_originals[orig_idx] = true
+        end
+
+        local child_deletions = {}
+        for cj, child in ipairs(orig_children) do
+          if not matched_child_originals[cj] then
+            table.insert(child_deletions, {
+              name = child.name,
+              display_type = child.display_type,
+              parent_name = orig_entry.name,
+            })
+          end
+        end
+
+        if #child_deletions > 0 and not allow_deletions then
+          -- Return child deletions for the caller to confirm
+          return false, nil, {}, child_deletions
+        end
+
+        -- If deletions allowed, filter out deleted children and re-match
+        if allow_deletions and #child_deletions > 0 then
+          local filtered_children = {}
+          for cj, child in ipairs(orig_children) do
+            if matched_child_originals[cj] then
+              table.insert(filtered_children, child)
+            end
+          end
+          orig_children = filtered_children
+          child_matched, child_err = match_entries(group.children, orig_children)
+        end
+      end
 
       -- Build ordered children, detect renames, and handle duplicates
       local ordered_children = {}
@@ -583,10 +634,11 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         end
       end
 
-      -- Reconstruct if children were reordered, duplicated, or have new comments
-      if has_child_duplicates or children_order_changed(child_matched, #orig_children) or has_child_new_comments then
+      -- Reconstruct if children were reordered, duplicated, deleted, or have new comments
+      local has_child_deletions = #orig_children ~= #(orig_entry.children or {})
+      if has_child_duplicates or has_child_deletions or children_order_changed(child_matched, #orig_children) or has_child_new_comments then
         local lp = lang.comment_prefix or "//"
-        entry_copy.lines = reconstruct_parent(orig_entry, ordered_children, child_matched, group.children, lp)
+        entry_copy.lines = reconstruct_parent(orig_entry, ordered_children, child_matched, group.children, lp, orig_children)
       end
     end
 

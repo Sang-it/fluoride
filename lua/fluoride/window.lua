@@ -36,9 +36,10 @@ end
 --- Build display lines and a flat entry map from code point entries.
 --- The flat_map maps each 1-indexed buffer line to its entry (parent or child).
 --- @param entries table[] list of code point entries from treesitter module
+--- @param with_children boolean whether to include nested child entries
 --- @return string[] display_lines
 --- @return table[] flat_map list of { entry, parent_index, child_index }
-local function build_display_lines(entries)
+local function build_display_lines(entries, with_children)
   local lines = {}
   local flat_map = {}
 
@@ -46,7 +47,7 @@ local function build_display_lines(entries)
     table.insert(lines, entry_display(entry))
     table.insert(flat_map, { entry = entry, parent_index = i, child_index = nil })
 
-    if entry.children and #entry.children > 0 then
+    if with_children and entry.children and #entry.children > 0 then
       for j, child in ipairs(entry.children) do
         table.insert(lines, CHILD_PREFIX .. entry_display(child))
         table.insert(flat_map, { entry = child, parent_index = i, child_index = j })
@@ -223,8 +224,8 @@ function M.open(source_bufnr, entries, lang, config)
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
 
-  -- Populate the buffer with display lines
-  local display_lines, flat_map = build_display_lines(entries)
+  -- Populate the buffer with display lines (placeholder, repopulated after config is read)
+  local display_lines, flat_map = build_display_lines(entries, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
 
   -- Mark the buffer as unmodified after initial population
@@ -239,7 +240,13 @@ function M.open(source_bufnr, entries, lang, config)
   local hl_config = config and config.highlight or {}
   local peek_duration = hl_config.peek_duration or 200
   local rename_duration = hl_config.rename_duration or 130
+  local show_children = config and config.show_children ~= false
   local win = open_sidebar(buf, win_config)
+
+  -- Repopulate with correct show_children state
+  display_lines, flat_map = build_display_lines(entries, show_children)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
+  vim.api.nvim_set_option_value("modified", false, { buf = buf })
 
   -- Apply initial syntax highlighting
   apply_highlights(buf, highlights, sorted_prefixes)
@@ -263,6 +270,10 @@ function M.open(source_bufnr, entries, lang, config)
     if km.close ~= false then table.insert(parts, (km.close or "q") .. "=close") end
     if km.peek ~= false then table.insert(parts, (km.peek or "gd") .. "=peek") end
     if km.hover ~= false then table.insert(parts, (km.hover or "K") .. "=hover") end
+    if km.toggle_children ~= false then
+      local state = show_children and "on" or "off"
+      table.insert(parts, (km.toggle_children or "<Tab>") .. "=children:" .. state)
+    end
     table.insert(virt_lines, { { table.concat(parts, " "), "Comment" } })
     vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
       virt_lines = virt_lines,
@@ -411,6 +422,17 @@ function M.open(source_bufnr, entries, lang, config)
       vim.lsp.buf.hover()
     end
   end, "LSP hover for code point")
+
+  -- Toggle child declarations visibility
+  map(km.toggle_children or "<Tab>", function()
+    show_children = not show_children
+    local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
+    flat_map = new_flat_map
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+    vim.api.nvim_set_option_value("modified", false, { buf = buf })
+    apply_highlights(buf, highlights, sorted_prefixes)
+    update_footer()
+  end, "Toggle child declarations")
 
   -- Handle :w — intercept the save and apply reordering + renames
   vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -578,7 +600,7 @@ function M.open(source_bufnr, entries, lang, config)
           local new_entries, _ = treesitter.get_code_points(source_bufnr)
           if #new_entries > 0 then
             entries = new_entries
-            local new_display_lines, new_flat_map = build_display_lines(entries)
+            local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
             flat_map = new_flat_map
             vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
             vim.api.nvim_set_option_value("modified", false, { buf = buf })
@@ -680,7 +702,7 @@ function M.open(source_bufnr, entries, lang, config)
         local new_entries, _ = treesitter.get_code_points(source_bufnr)
         if #new_entries > 0 then
           entries = new_entries
-          local new_display_lines, new_flat_map = build_display_lines(entries)
+          local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
           flat_map = new_flat_map
           vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
           vim.api.nvim_set_option_value("modified", false, { buf = buf })

@@ -24,7 +24,9 @@ local DEFAULT_CONFIG = {
     jump = "<CR>",
     peek = "gd",
     hover = "K",
+    toggle_children = "<Tab>",
   },
+  show_children = true,
   confirm_delete = true,
   highlight = {
     peek_duration = 200,    -- ms for gd peek flash

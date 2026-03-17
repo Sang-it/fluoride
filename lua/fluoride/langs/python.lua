@@ -14,6 +14,8 @@ local DECLARATION_TYPES = {
   class_definition = "class",
   decorated_definition = "decorated",
   assignment = "variable",
+  augmented_assignment = "variable",
+  type_alias_statement = "type",
   expression_statement = "expression",
 }
 
@@ -25,16 +27,19 @@ local SKIP_TYPES = {
 }
 
 M.highlights = {
-  ["def"]       = { prefix = "Keyword",  name = "Function" },
-  ["async def"] = { prefix = "Keyword",  name = "Function" },
-  ["class"]     = { prefix = "Type",     name = "Type" },
-  ["variable"]  = { prefix = "Keyword",  name = "Identifier" },
-  ["expression"] = { prefix = "Keyword", name = "Identifier" },
-  ["if"]        = { prefix = "Keyword",  name = "Identifier" },
-  ["while"]     = { prefix = "Keyword",  name = "Identifier" },
-  ["for"]       = { prefix = "Keyword",  name = "Identifier" },
-  ["try"]       = { prefix = "Keyword",  name = "Identifier" },
-  ["with"]      = { prefix = "Keyword",  name = "Identifier" },
+  ["def"]        = { prefix = "Keyword",  name = "Function" },
+  ["async def"]  = { prefix = "Keyword",  name = "Function" },
+  ["class"]      = { prefix = "Type",     name = "Type" },
+  ["variable"]   = { prefix = "Keyword",  name = "Identifier" },
+  ["type"]       = { prefix = "Type",     name = "Type" },
+  ["expression"] = { prefix = "Keyword",  name = "Identifier" },
+  ["if"]         = { prefix = "Keyword",  name = "Identifier" },
+  ["while"]      = { prefix = "Keyword",  name = "Identifier" },
+  ["for"]        = { prefix = "Keyword",  name = "Identifier" },
+  ["try"]        = { prefix = "Keyword",  name = "Identifier" },
+  ["with"]       = { prefix = "Keyword",  name = "Identifier" },
+  ["assert"]     = { prefix = "Keyword",  name = "Identifier" },
+  ["property"]   = { prefix = "Keyword",  name = "Identifier" },
 }
 
 function M.is_declaration(node)
@@ -82,8 +87,24 @@ function M.get_name(node, bufnr)
     end
   end
 
+  -- Augmented assignment: e.g., `counter += 1`
+  if node_type == "augmented_assignment" then
+    local left = node:field("left")[1]
+    if left then
+      return vim.treesitter.get_node_text(left, bufnr)
+    end
+  end
+
+  -- Type alias (Python 3.12): `type Vector = list[float]`
+  if node_type == "type_alias_statement" then
+    local name_node = node:field("name")[1]
+    if name_node then
+      return vim.treesitter.get_node_text(name_node, bufnr)
+    end
+  end
+
   if node_type == "expression_statement" then
-    -- Check if it's a typed assignment (type_alias in older Python TS grammars)
+    -- Check if it's an assignment inside expression_statement
     for child in node:iter_children() do
       if child:type() == "assignment" then
         local left = child:field("left")[1]
@@ -106,6 +127,7 @@ function M.get_name(node, bufnr)
     or node_type == "for_statement"
     or node_type == "try_statement"
     or node_type == "with_statement"
+    or node_type == "assert_statement"
   then
     local text = vim.treesitter.get_node_text(node, bufnr)
     local first_line = text:match("^([^\n]*)")
@@ -146,6 +168,14 @@ function M.get_display_type(node, bufnr)
 
   if node_type == "class_definition" then
     return "class"
+  end
+
+  if node_type == "type_alias_statement" then
+    return "type"
+  end
+
+  if node_type == "assert_statement" then
+    return "assert"
   end
 
   -- Statement types
@@ -199,11 +229,14 @@ end
 
 function M.is_nestable(node)
   local t = node:type()
-  return t == "class_definition" or t == "decorated_definition"
-    and (function()
-      local inner = get_inner_definition(node)
-      return inner and inner:type() == "class_definition"
-    end)()
+  if t == "class_definition" then
+    return true
+  end
+  if t == "decorated_definition" then
+    local inner = get_inner_definition(node)
+    return inner ~= nil and inner:type() == "class_definition"
+  end
+  return false
 end
 
 function M.get_body_node(node)
@@ -222,6 +255,7 @@ local CHILD_TYPES = {
   function_definition = true,
   decorated_definition = true,
   assignment = true,
+  augmented_assignment = true,
   expression_statement = true,
 }
 

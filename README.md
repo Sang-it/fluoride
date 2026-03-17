@@ -11,10 +11,16 @@ A Neovim plugin that lets you view, reorder, and rename top-level code declarati
 - **View** all top-level declarations (functions, classes, variables, types, etc.) in a floating window
 - **Reorder** declarations by moving lines in the float — saves back to the source file on `:w`
 - **Rename** symbols by editing names in the float — triggers LSP rename across your project
+- **Comment** — write `// comment` above any code point in the float and it's written to the source file in the language's native syntax (`#` for Python, `--` for Lua, `//` for JS/TS/Go/Rust/C)
 - **Jump** to any code point by pressing `<CR>` on its line
+- **Peek** at a code point with `gd` — centers and flashes the declaration in the source window without leaving the float
+- **Hover** — press `K` on any code point to show LSP hover info (type signature, docs)
+- **Nested declarations** — view and reorder methods inside classes, functions inside impl/trait blocks
 - **Syntax highlighting** with type-aware colors (keywords, functions, types, identifiers)
 - **Arity display** for functions (e.g., `function greet/1`)
-- **Relative line numbers** with smart toggle (relative in normal mode, absolute in insert mode)
+- **Responsive layout** — sidebar on wide terminals, centered float on narrow ones
+- **LSP format on save** — auto-formats the source buffer after reorder if LSP supports it
+- **Attached comments** — comments directly above a declaration move with it when reordered
 
 ## Supported Languages
 

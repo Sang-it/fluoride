@@ -12,6 +12,7 @@ M.comment_prefix = "//"
 
 local DECLARATION_TYPES = {
   function_declaration = "function",
+  generator_function_declaration = "function*",
   lexical_declaration = "variable",
   variable_declaration = "variable",
   class_declaration = "class",
@@ -22,11 +23,14 @@ local DECLARATION_TYPES = {
 local SKIP_TYPES = {
   comment = true,
   import_statement = true,
+  decorator = true,
 }
 
 M.highlights = {
   ["function"]         = { prefix = "Keyword",  name = "Function" },
+  ["function*"]        = { prefix = "Keyword",  name = "Function" },
   ["export function"]  = { prefix = "Keyword",  name = "Function" },
+  ["export function*"] = { prefix = "Keyword",  name = "Function" },
   ["const"]            = { prefix = "Keyword",  name = "Identifier" },
   ["let"]              = { prefix = "Keyword",  name = "Identifier" },
   ["var"]              = { prefix = "Keyword",  name = "Identifier" },
@@ -39,6 +43,7 @@ M.highlights = {
   ["expression"]       = { prefix = "Keyword",  name = "Identifier" },
   ["method"]           = { prefix = "Keyword",  name = "Function" },
   ["field"]            = { prefix = "Keyword",  name = "Identifier" },
+  ["static block"]     = { prefix = "Keyword",  name = "Identifier" },
   ["if"]               = { prefix = "Keyword",  name = "Identifier" },
   ["while"]            = { prefix = "Keyword",  name = "Identifier" },
   ["for"]              = { prefix = "Keyword",  name = "Identifier" },
@@ -54,7 +59,10 @@ end
 function M.get_name(node, bufnr)
   local node_type = node:type()
 
-  if node_type == "function_declaration" or node_type == "class_declaration" then
+  if node_type == "function_declaration"
+    or node_type == "generator_function_declaration"
+    or node_type == "class_declaration"
+  then
     local name_node = node:field("name")[1]
     if name_node then
       return vim.treesitter.get_node_text(name_node, bufnr)
@@ -79,11 +87,16 @@ function M.get_name(node, bufnr)
         return M.get_name(child, bufnr)
       end
     end
+    -- Fallback: strip "export" / "export default" to avoid duplication
     local text = vim.treesitter.get_node_text(node, bufnr)
     local first_line = text:match("^([^\n]*)")
+    first_line = first_line:gsub("^export%s+default%s+", "")
+    first_line = first_line:gsub("^export%s+", "")
+    first_line = vim.trim(first_line)
     if #first_line > 40 then
       first_line = first_line:sub(1, 37) .. "..."
     end
+    if first_line == "" then first_line = "<export>" end
     return first_line
   end
 
@@ -135,6 +148,11 @@ function M.get_name(node, bufnr)
     end
   end
 
+  -- Static block
+  if node_type == "static_block" then
+    return "<static>"
+  end
+
   return "[unknown]"
 end
 
@@ -171,6 +189,7 @@ function M.get_display_type(node, bufnr)
   -- Class members
   if node_type == "method_definition" then return "method" end
   if node_type == "field_definition" then return "field" end
+  if node_type == "static_block" then return "static block" end
 
   -- Statement types
   local STATEMENT_MAP = {
@@ -193,9 +212,9 @@ function M.get_arity(node, _bufnr)
   local node_type = node:type()
 
   if node_type == "function_declaration"
+    or node_type == "generator_function_declaration"
     or node_type == "function"
     or node_type == "generator_function"
-    or node_type == "generator_function_declaration"
     or node_type == "method_definition"
   then
     local params = node:field("parameters")[1]
@@ -276,6 +295,7 @@ end
 local CHILD_TYPES = {
   method_definition = true,
   field_definition = true,
+  static_block = true,
 }
 
 function M.is_child_declaration(node)

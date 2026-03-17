@@ -197,7 +197,8 @@ function M.get_name(node, bufnr)
     if #first_line > 40 then
       first_line = first_line:sub(1, 37) .. "..."
     end
-    if first_line == "" then return nil end
+    -- For statements with no condition (try, do), use a block indicator
+    if first_line == "" then return "{...}" end
     return first_line
   end
 

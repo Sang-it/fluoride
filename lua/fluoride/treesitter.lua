@@ -89,9 +89,13 @@ local function build_entry(node, lang, bufnr, sr_override)
     name = first_line ~= "" and first_line or "<L" .. (sr + 1) .. ">"
   end
 
+  -- Sanitize: ensure name and display_type never contain newlines
+  name = name:gsub("\n", " ")
+  local display_type = lang.get_display_type(node, bufnr):gsub("\n", " ")
+
   return {
     name = name,
-    display_type = lang.get_display_type(node, bufnr),
+    display_type = display_type,
     arity = lang.get_arity(node, bufnr),
     start_row = effective_sr,
     decl_start_row = sr, -- the actual declaration start (without leading comments)

@@ -29,6 +29,7 @@ local function entry_display(entry)
   if entry.arity then
     display = display .. "/" .. entry.arity
   end
+  display = display:gsub("\n", " ")
   return display
 end
 

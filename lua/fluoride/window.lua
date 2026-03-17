@@ -332,9 +332,22 @@ function M.open(source_bufnr, entries, lang, config)
 
     local source_win = find_source_win()
     if source_win then
-      local target_row = map_entry.entry.start_row + 1
+      local target_row = map_entry.entry.decl_start_row + 1
       vim.api.nvim_set_current_win(source_win)
-      vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
+
+      -- Find the column of the symbol name on the declaration line
+      local name = map_entry.entry.name
+      local decl_line = vim.api.nvim_buf_get_lines(source_bufnr, target_row - 1, target_row, false)[1] or ""
+      local col = 0
+      if name and #name > 0 then
+        local pattern = "%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]"
+        local found = decl_line:find(pattern)
+        if found then
+          col = found - 1
+        end
+      end
+
+      vim.api.nvim_win_set_cursor(source_win, { target_row, col })
       vim.fn.winrestview({ topline = target_row })
     end
   end, "Jump to code point")

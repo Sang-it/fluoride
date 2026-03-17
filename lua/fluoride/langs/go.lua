@@ -22,6 +22,7 @@ local SKIP_TYPES = {
   comment = true,
   import_declaration = true,
   package_clause = true,
+  empty_statement = true,
 }
 
 M.highlights = {
@@ -31,6 +32,10 @@ M.highlights = {
   ["const"] = { prefix = "Keyword",  name = "Identifier" },
   ["field"] = { prefix = "Keyword",  name = "Identifier" },
   ["method spec"] = { prefix = "Keyword", name = "Function" },
+  ["embedded"] = { prefix = "Type",    name = "Type" },
+  ["go"]    = { prefix = "Keyword",  name = "Identifier" },
+  ["defer"] = { prefix = "Keyword",  name = "Identifier" },
+  ["select"] = { prefix = "Keyword", name = "Identifier" },
 }
 
 function M.is_declaration(node)
@@ -120,6 +125,31 @@ function M.get_name(node, bufnr)
     end
   end
 
+  -- Embedded type in interface (e.g., io.Reader)
+  if node_type == "type_identifier" or node_type == "qualified_type" then
+    return vim.treesitter.get_node_text(node, bufnr)
+  end
+
+  -- Statement types
+  if node_type == "go_statement"
+    or node_type == "defer_statement"
+    or node_type == "select_statement"
+  then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    local first_line = text:match("^([^\n]*)")
+    local keyword = first_line:match("^(%w+)")
+    if keyword then
+      first_line = vim.trim(first_line:sub(#keyword + 1))
+    end
+    first_line = first_line:gsub("[{]%s*$", "")
+    first_line = vim.trim(first_line)
+    if #first_line > 40 then
+      first_line = first_line:sub(1, 37) .. "..."
+    end
+    if first_line == "" then return nil end
+    return first_line
+  end
+
   return "[unknown]"
 end
 
@@ -128,6 +158,10 @@ function M.get_display_type(node, _bufnr)
 
   if node_type == "field_declaration" then return "field" end
   if node_type == "method_spec" then return "method spec" end
+  if node_type == "type_identifier" or node_type == "qualified_type" then return "embedded" end
+  if node_type == "go_statement" then return "go" end
+  if node_type == "defer_statement" then return "defer" end
+  if node_type == "select_statement" then return "select" end
 
   return DECLARATION_TYPES[node_type] or node_type
 end
@@ -206,6 +240,8 @@ end
 local GO_CHILD_TYPES = {
   field_declaration = true,
   method_spec = true,
+  type_identifier = true,   -- embedded type in interface
+  qualified_type = true,     -- embedded qualified type (e.g., io.Reader)
 }
 
 function M.is_child_declaration(node)

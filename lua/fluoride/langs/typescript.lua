@@ -25,6 +25,7 @@ local DECLARATION_TYPES = {
   expression_statement = "expression",
   ambient_declaration = "declare",
   module = "namespace",
+  function_signature = "function",
 }
 
 -- Node types to skip entirely

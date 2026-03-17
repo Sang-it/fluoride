@@ -578,6 +578,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
           if group.children[j].name ~= orig_child.name then
             table.insert(renames, { old_name = orig_child.name, new_name = group.children[j].name })
             child_existing_names[group.children[j].name] = true
+            affected_names[group.children[j].name] = true
           end
         else
           -- Unmatched — this is a duplicate child

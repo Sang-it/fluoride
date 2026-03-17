@@ -44,6 +44,43 @@ local function translate_comment(line, lang_prefix)
   return line
 end
 
+--- Generate the next available suffixed name (e.g., greet_1, greet_2).
+--- @param base_name string the original name
+--- @param existing_names table<string, boolean> set of names already in use
+--- @return string suffixed name
+local function next_suffix_name(base_name, existing_names)
+  local n = 1
+  while existing_names[base_name .. "_" .. n] do
+    n = n + 1
+  end
+  return base_name .. "_" .. n
+end
+
+--- Rename the first occurrence of old_name in a list of lines using word-boundary matching.
+--- @param lines string[] source lines
+--- @param old_name string name to find
+--- @param new_name string replacement name
+--- @return string[] new lines with the rename applied
+local function rename_in_lines(lines, old_name, new_name)
+  local copied = {}
+  local renamed = false
+  for _, line in ipairs(lines) do
+    if not renamed then
+      local pattern = "%f[%w_]" .. vim.pesc(old_name) .. "%f[^%w_]"
+      local new_line, count = line:gsub(pattern, new_name, 1)
+      if count > 0 then
+        table.insert(copied, new_line)
+        renamed = true
+      else
+        table.insert(copied, line)
+      end
+    else
+      table.insert(copied, line)
+    end
+  end
+  return copied
+end
+
 --- Check if a display line is a child (has indent prefix).
 --- @param line string
 --- @return boolean is_child
@@ -132,13 +169,7 @@ local function match_entries(parsed, originals)
     end
   end
 
-  -- Verify
-  for i, _ in ipairs(parsed) do
-    if not matched[i] then
-      return matched, "could not match item " .. i
-    end
-  end
-
+  -- Note: unmatched items are OK — they may be duplicates
   return matched, nil
 end
 
@@ -328,51 +359,113 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang)
     end
   end
 
-  -- Validate parent count
-  if #parsed_groups ~= #original_entries then
-    return false, "parent count mismatch: expected " .. #original_entries .. " entries, got " .. #parsed_groups .. ". Do not add or remove top-level entries.", {}
+  -- Validate parent count (deletions not allowed, additions are OK)
+  if #parsed_groups < #original_entries then
+    return false, "entries were removed: expected at least " .. #original_entries .. " entries, got " .. #parsed_groups .. ". Do not remove entries.", {}
   end
 
-  -- Match top-level parents
+  -- Match top-level parents (only match against original entries)
   local parent_parsed = {}
   for _, g in ipairs(parsed_groups) do
     table.insert(parent_parsed, { prefix = g.prefix, name = g.name })
   end
 
   local parent_matched, err = match_entries(parent_parsed, original_entries)
-  if err then
-    return false, err, {}
+  -- err from match_entries means some parsed items couldn't be matched —
+  -- this is expected when there are duplicates (more parsed than originals)
+
+  -- Detect top-level renames and build a set of existing names
+  local renames = {}
+  local existing_names = {}
+  for _, entry in ipairs(original_entries) do
+    existing_names[entry.name] = true
   end
 
-  -- Detect top-level renames
-  local renames = {}
   for i, p in ipairs(parent_parsed) do
-    local entry = original_entries[parent_matched[i]]
-    if p.name ~= entry.name then
-      table.insert(renames, { old_name = entry.name, new_name = p.name })
+    if parent_matched[i] then
+      local entry = original_entries[parent_matched[i]]
+      if p.name ~= entry.name then
+        table.insert(renames, { old_name = entry.name, new_name = p.name })
+        existing_names[p.name] = true
+      end
     end
   end
 
-  -- Build ordered entries, handling child reordering
+  -- Build ordered entries, handling child reordering and duplicates
   local ordered_entries = {}
 
   for i, group in ipairs(parsed_groups) do
-    local orig_entry = original_entries[parent_matched[i]]
+    local entry_copy
 
-    -- Deep copy entry so we can modify lines if children reordered
-    local entry_copy = {
-      name = orig_entry.name,
-      display_type = orig_entry.display_type,
-      arity = orig_entry.arity,
-      start_row = orig_entry.start_row,
-      decl_start_row = orig_entry.decl_start_row,
-      end_row = orig_entry.end_row,
-      lines = orig_entry.lines,
-      children = orig_entry.children,
-    }
+    if parent_matched[i] then
+      -- Matched to an original entry
+      local orig_entry = original_entries[parent_matched[i]]
+      entry_copy = {
+        name = orig_entry.name,
+        display_type = orig_entry.display_type,
+        arity = orig_entry.arity,
+        start_row = orig_entry.start_row,
+        decl_start_row = orig_entry.decl_start_row,
+        end_row = orig_entry.end_row,
+        lines = orig_entry.lines,
+        children = orig_entry.children,
+      }
+    else
+      -- Unmatched — this is a duplicate. Find the template entry.
+      -- Look at the entry directly above in parsed_groups that has the same prefix.
+      local template = nil
+      for j = i - 1, 1, -1 do
+        if parent_matched[j] and parsed_groups[j].prefix == group.prefix then
+          template = original_entries[parent_matched[j]]
+          break
+        end
+      end
+      -- If not found above, look below
+      if not template then
+        for j = i + 1, #parsed_groups do
+          if parent_matched[j] and parsed_groups[j].prefix == group.prefix then
+            template = original_entries[parent_matched[j]]
+            break
+          end
+        end
+      end
+      -- If still no template, try any matched entry with same prefix
+      if not template then
+        for j, entry in ipairs(original_entries) do
+          if entry.display_type == group.prefix then
+            template = entry
+            break
+          end
+        end
+      end
 
-    -- If this parent has children, check if they were reordered
-    if orig_entry.children and #orig_entry.children > 0 then
+      if not template then
+        return false, "could not find a template for duplicate entry: " .. (group.prefix or "") .. " " .. (group.name or ""), {}
+      end
+
+      -- Generate a suffixed name
+      local new_name = next_suffix_name(template.name, existing_names)
+      existing_names[new_name] = true
+
+      -- Copy the template's lines with the name replaced
+      local new_lines = rename_in_lines(template.lines, template.name, new_name)
+
+      entry_copy = {
+        name = new_name,
+        display_type = template.display_type,
+        arity = template.arity,
+        start_row = template.start_row,
+        decl_start_row = template.decl_start_row,
+        end_row = template.end_row,
+        lines = new_lines,
+        children = template.children and vim.deepcopy(template.children) or nil,
+        is_duplicate = true,
+      }
+    end
+
+    -- If this parent has children, check if they were reordered (skip for duplicates)
+    local orig_entry = parent_matched[i] and original_entries[parent_matched[i]] or nil
+    if not entry_copy.is_duplicate and orig_entry and orig_entry.children and #orig_entry.children > 0 then
       local orig_children = orig_entry.children
 
       -- Validate child count

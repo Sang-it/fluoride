@@ -413,6 +413,7 @@ function M.open(source_bufnr, entries, lang, config)
         local ok, err, renames, deletions = reorder.apply(source_bufnr, entries, filtered, lang)
 
         -- Handle deletions: show confirmation if needed
+        local did_delete = false
         if not ok and deletions and #deletions > 0 then
           local confirm_delete = config and config.confirm_delete
           if confirm_delete == nil then confirm_delete = true end
@@ -425,6 +426,7 @@ function M.open(source_bufnr, entries, lang, config)
           if not confirm_delete then
             -- Skip confirmation — re-apply with deletions allowed
             ok, err, renames = reorder.apply(source_bufnr, entries, filtered, lang, true)
+            did_delete = ok
           else
             local answer = vim.fn.confirm(
               "Delete " .. table.concat(names, ", ") .. "?",
@@ -433,6 +435,7 @@ function M.open(source_bufnr, entries, lang, config)
             )
             if answer == 1 then
               ok, err, renames = reorder.apply(source_bufnr, entries, filtered, lang, true)
+              did_delete = ok
             else
               return -- user cancelled
             end
@@ -510,7 +513,8 @@ function M.open(source_bufnr, entries, lang, config)
             refresh()
           end)
         else
-          vim.notify("Fluoride: reorder applied", vim.log.levels.INFO)
+          local msg = did_delete and "Fluoride: deletion applied" or "Fluoride: reorder applied"
+          vim.notify(msg, vim.log.levels.INFO)
           refresh()
         end
       end)

@@ -168,7 +168,7 @@ function M.get_name(node, bufnr)
   end
 
   -- Interface members
-  if node_type == "property_signature" or node_type == "method_signature" then
+  if node_type == "property_signature" or node_type == "method_signature" or node_type == "function_signature" then
     local name_node = node:field("name")[1]
     if name_node then
       return vim.treesitter.get_node_text(name_node, bufnr)
@@ -225,7 +225,7 @@ function M.get_display_type(node, bufnr)
   end
 
   -- Interface members
-  if node_type == "method_signature" then
+  if node_type == "method_signature" or node_type == "function_signature" then
     return "method"
   end
   if node_type == "property_signature" then
@@ -263,6 +263,7 @@ function M.get_arity(node, _bufnr)
     or node_type == "generator_function_declaration"
     or node_type == "method_definition"
     or node_type == "method_signature"
+    or node_type == "function_signature"
   then
     local params = node:field("parameters")[1]
     if params then
@@ -363,6 +364,7 @@ local CHILD_TYPES = {
   property_definition = true,
   property_signature = true,
   method_signature = true,
+  function_signature = true,
 }
 
 --- Check if a child node inside a class is a declaration.

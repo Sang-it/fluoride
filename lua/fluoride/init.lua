@@ -3,14 +3,20 @@ local M = {}
 local DEFAULT_CONFIG = {
   window = {
     title = "Fluoride",
-    width = 0.3,
-    height = 0.85,
-    row = 2,
-    col = 2,
     border = "single",
     winblend = 15,
     footer = true,
     center_breakpoint = 80,
+    sidebar = {
+      width = 0.3,
+      height = 0.85,
+      row = 2,
+      col = 2,
+    },
+    centered = {
+      width = 0.6,
+      height = 0.6,
+    },
   },
   keymaps = {
     close = "q",

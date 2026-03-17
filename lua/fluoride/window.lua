@@ -147,20 +147,22 @@ end
 --- @param win_config table window configuration from plugin config
 --- @return number win window handle
 local function open_sidebar(buf, win_config)
+  local sidebar = win_config.sidebar or {}
+  local centered = win_config.centered or {}
   local width, height, row, col
 
-      if vim.o.columns < (win_config.center_breakpoint or 80) then
+  if vim.o.columns < (win_config.center_breakpoint or 80) then
     -- Centered layout for small terminals
-    width = math.floor(vim.o.columns * 0.6)
-    height = math.floor(vim.o.lines * 0.6)
+    width = math.floor(vim.o.columns * (centered.width or 0.6))
+    height = math.floor(vim.o.lines * (centered.height or 0.6))
     row = math.floor((vim.o.lines - height) / 2)
     col = math.floor((vim.o.columns - width) / 2)
   else
     -- Sidebar layout (default)
-    width = math.floor(vim.o.columns * win_config.width)
-    height = math.floor(vim.o.lines * win_config.height)
-    row = win_config.row
-    col = vim.o.columns - width - win_config.col
+    width = math.floor(vim.o.columns * (sidebar.width or 0.3))
+    height = math.floor(vim.o.lines * (sidebar.height or 0.85))
+    row = sidebar.row or 2
+    col = vim.o.columns - width - (sidebar.col or 2)
   end
 
   -- Clamp dimensions to fit within the editor
@@ -625,8 +627,10 @@ function M.open(source_bufnr, entries, lang, config)
   -- Reposition window when terminal is resized.
   -- Sidebar mode: keep the initial pixel dimensions, only reposition.
   -- Centered mode: recalculate proportionally.
-  local sidebar_width = math.floor(vim.o.columns * win_config.width)
-  local sidebar_height = math.floor(vim.o.lines * win_config.height)
+  local sb = win_config.sidebar or {}
+  local ct = win_config.centered or {}
+  local sidebar_width = math.floor(vim.o.columns * (sb.width or 0.3))
+  local sidebar_height = math.floor(vim.o.lines * (sb.height or 0.85))
   local resize_group = vim.api.nvim_create_augroup("fluoride_resize", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = resize_group,
@@ -638,15 +642,15 @@ function M.open(source_bufnr, entries, lang, config)
 
       local new_width, new_height, new_row, new_col
       if vim.o.columns < (win_config.center_breakpoint or 80) then
-        new_width = math.floor(vim.o.columns * 0.6)
-        new_height = math.floor(vim.o.lines * 0.6)
+        new_width = math.floor(vim.o.columns * (ct.width or 0.6))
+        new_height = math.floor(vim.o.lines * (ct.height or 0.6))
         new_row = math.floor((vim.o.lines - new_height) / 2)
         new_col = math.floor((vim.o.columns - new_width) / 2)
       else
         new_width = sidebar_width
         new_height = sidebar_height
-        new_row = win_config.row
-        new_col = vim.o.columns - new_width - win_config.col
+        new_row = sb.row or 2
+        new_col = vim.o.columns - new_width - (sb.col or 2)
       end
 
       new_width = math.min(new_width, vim.o.columns - 2)

@@ -84,14 +84,20 @@ All options are optional. Defaults shown below:
 require("fluoride").setup({
   window = {
     title = "Fluoride",       -- string or false to hide
-    width = 0.3,              -- proportion of terminal width (0-1)
-    height = 0.85,            -- proportion of terminal height (0-1)
-    row = 2,                  -- rows from top edge
-    col = 2,                  -- cols from right edge
     border = "single",        -- any nvim_open_win border format
     winblend = 15,            -- transparency (0-100)
     footer = true,            -- show keybinding hints at bottom
     center_breakpoint = 80,   -- switch to centered layout below this width
+    sidebar = {               -- right-side floating window (wide terminals)
+      width = 0.3,            -- proportion of terminal width (0-1)
+      height = 0.85,          -- proportion of terminal height (0-1)
+      row = 2,                -- rows from top edge
+      col = 2,                -- cols from right edge
+    },
+    centered = {              -- centered float (narrow terminals)
+      width = 0.6,            -- proportion of terminal width (0-1)
+      height = 0.6,           -- proportion of terminal height (0-1)
+    },
   },
   keymaps = {
     close = "q",              -- close the window
@@ -101,6 +107,10 @@ require("fluoride").setup({
     hover = "K",              -- LSP hover on code point
   },
   confirm_delete = true,      -- prompt before deleting code points (false to skip)
+  highlight = {
+    peek_duration = 200,      -- ms for gd peek flash
+    rename_duration = 130,    -- ms for rename flash per entry
+  },
 })
 ```
 

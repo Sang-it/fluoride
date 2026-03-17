@@ -19,6 +19,9 @@ local DECLARATION_TYPES = {
 local SKIP_TYPES = {
   comment = true,
   return_statement = true,
+  empty_statement = true,
+  label_statement = true,
+  goto_statement = true,
 }
 
 M.highlights = {
@@ -50,21 +53,6 @@ function M.get_name(node, bufnr)
 
   -- local x = ... or local function foo
   if node_type == "variable_declaration" then
-    -- Check if it's a local function (has a function_definition child via assignment)
-    for child in node:iter_children() do
-      if child:type() == "assignment_statement" then
-        -- local foo = function() ... end
-        for sub in child:iter_children() do
-          if sub:type() == "variable_list" then
-            local first = sub:child(0)
-            if first then
-              return vim.treesitter.get_node_text(first, bufnr)
-            end
-          end
-        end
-      end
-    end
-    -- Simple local declaration: find the variable name
     for child in node:iter_children() do
       if child:type() == "assignment_statement" then
         for sub in child:iter_children() do
@@ -113,13 +101,16 @@ function M.get_name(node, bufnr)
     or node_type == "while_statement"
     or node_type == "for_statement"
     or node_type == "for_in_statement"
+    or node_type == "for_numeric_statement"
+    or node_type == "for_generic_statement"
     or node_type == "do_statement"
     or node_type == "repeat_statement"
   then
     local text = vim.treesitter.get_node_text(node, bufnr)
     local first_line = text:match("^([^\n]*)")
-    local keyword = node_type:match("^(%w+)_statement$") or node_type
-    if first_line:sub(1, #keyword) == keyword then
+    -- Strip leading keyword
+    local keyword = first_line:match("^(%w+)")
+    if keyword then
       first_line = vim.trim(first_line:sub(#keyword + 1))
     end
     -- Strip trailing "then", "do"
@@ -158,6 +149,8 @@ function M.get_display_type(node, bufnr)
     while_statement = "while",
     for_statement = "for",
     for_in_statement = "for",
+    for_numeric_statement = "for",
+    for_generic_statement = "for",
     do_statement = "do",
     repeat_statement = "repeat",
   }
@@ -190,29 +183,6 @@ function M.get_arity(node, bufnr)
     return 0
   end
 
-  -- For variable declarations, check if the value is a function
-  if node_type == "variable_declaration" or node_type == "assignment_statement" then
-    -- Look for function definition in the value
-    local text = vim.treesitter.get_node_text(node, bufnr)
-    if text:match("function%s*%(") then
-      -- Count params by iterating deeper
-      for child in node:iter_children() do
-        if child:type() == "assignment_statement" then
-          for sub in child:iter_children() do
-            if sub:type() == "expression_list" then
-              for expr in sub:iter_children() do
-                if expr:type() == "function_definition" then
-                  return M.get_arity(expr, bufnr)
-                end
-              end
-            end
-          end
-        end
-      end
-    end
-    return nil
-  end
-
   -- function_definition (anonymous, used as value)
   if node_type == "function_definition" then
     local params = node:field("parameters")[1]
@@ -227,6 +197,35 @@ function M.get_arity(node, bufnr)
       return count
     end
     return 0
+  end
+
+  -- For variable declarations and assignments, check if the value is a function
+  if node_type == "variable_declaration" or node_type == "assignment_statement" then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    if text:match("function%s*%(") then
+      for child in node:iter_children() do
+        if child:type() == "assignment_statement" then
+          for sub in child:iter_children() do
+            if sub:type() == "expression_list" then
+              for expr in sub:iter_children() do
+                if expr:type() == "function_definition" then
+                  return M.get_arity(expr, bufnr)
+                end
+              end
+            end
+          end
+        end
+        -- Direct expression_list (for assignment_statement at top level)
+        if child:type() == "expression_list" then
+          for expr in child:iter_children() do
+            if expr:type() == "function_definition" then
+              return M.get_arity(expr, bufnr)
+            end
+          end
+        end
+      end
+    end
+    return nil
   end
 
   return nil

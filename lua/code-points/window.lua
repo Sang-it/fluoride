@@ -493,7 +493,11 @@ function M.open(source_bufnr, entries, lang, config)
   active_win = win
   active_buf = buf
 
-  -- Reposition window when terminal is resized
+  -- Reposition window when terminal is resized.
+  -- Sidebar mode: keep the initial pixel dimensions, only reposition.
+  -- Centered mode: recalculate proportionally.
+  local sidebar_width = math.floor(vim.o.columns * win_config.width)
+  local sidebar_height = math.floor(vim.o.lines * win_config.height)
   local resize_group = vim.api.nvim_create_augroup("code_points_resize", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = resize_group,
@@ -510,8 +514,8 @@ function M.open(source_bufnr, entries, lang, config)
         new_row = math.floor((vim.o.lines - new_height) / 2)
         new_col = math.floor((vim.o.columns - new_width) / 2)
       else
-        new_width = math.floor(vim.o.columns * win_config.width)
-        new_height = math.floor(vim.o.lines * win_config.height)
+        new_width = sidebar_width
+        new_height = sidebar_height
         new_row = win_config.row
         new_col = vim.o.columns - new_width - win_config.col
       end

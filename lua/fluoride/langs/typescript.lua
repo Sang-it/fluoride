@@ -167,6 +167,14 @@ function M.get_name(node, bufnr)
     end
   end
 
+  -- Interface members
+  if node_type == "property_signature" or node_type == "method_signature" then
+    local name_node = node:field("name")[1]
+    if name_node then
+      return vim.treesitter.get_node_text(name_node, bufnr)
+    end
+  end
+
   return "[unknown]"
 end
 
@@ -216,6 +224,14 @@ function M.get_display_type(node, bufnr)
     return "property"
   end
 
+  -- Interface members
+  if node_type == "method_signature" then
+    return "method"
+  end
+  if node_type == "property_signature" then
+    return "property"
+  end
+
   -- Statement types
   local STATEMENT_MAP = {
     if_statement = "if",
@@ -246,6 +262,7 @@ function M.get_arity(node, _bufnr)
     or node_type == "generator_function"
     or node_type == "generator_function_declaration"
     or node_type == "method_definition"
+    or node_type == "method_signature"
   then
     local params = node:field("parameters")[1]
     if params then
@@ -314,16 +331,25 @@ end
 --- @param node any treesitter node
 --- @return boolean
 function M.is_nestable(node)
-  return node:type() == "class_declaration"
+  local t = node:type()
+  return t == "class_declaration" or t == "interface_declaration"
 end
 
 --- Get the body node to iterate for child declarations.
 --- @param node any treesitter node
 --- @return any|nil body node
 function M.get_body_node(node)
-  if node:type() == "class_declaration" then
+  local t = node:type()
+  if t == "class_declaration" then
     for child in node:iter_children() do
       if child:type() == "class_body" then
+        return child
+      end
+    end
+  end
+  if t == "interface_declaration" then
+    for child in node:iter_children() do
+      if child:type() == "interface_body" or child:type() == "object_type" then
         return child
       end
     end
@@ -335,6 +361,8 @@ local CHILD_TYPES = {
   method_definition = true,
   public_field_definition = true,
   property_definition = true,
+  property_signature = true,
+  method_signature = true,
 }
 
 --- Check if a child node inside a class is a declaration.

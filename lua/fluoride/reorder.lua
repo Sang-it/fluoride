@@ -499,25 +499,78 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     if not entry_copy.is_duplicate and orig_entry and orig_entry.children and #orig_entry.children > 0 then
       local orig_children = orig_entry.children
 
-      -- Validate child count
-      if #group.children ~= #orig_children then
-        return false, "child count mismatch for '" .. orig_entry.name .. "': expected " .. #orig_children .. ", got " .. #group.children, {}, nil
+      -- Deletions of children not allowed
+      if #group.children < #orig_children then
+        return false, "child entries were removed in '" .. orig_entry.name .. "': expected at least " .. #orig_children .. ", got " .. #group.children, {}, nil
       end
 
       -- Match children
       local child_matched, child_err = match_entries(group.children, orig_children)
-      if child_err then
-        return false, "in '" .. orig_entry.name .. "': " .. child_err, {}, nil
+
+      -- Build ordered children, detect renames, and handle duplicates
+      local ordered_children = {}
+      local child_existing_names = {}
+      for _, c in ipairs(orig_children) do
+        child_existing_names[c.name] = true
       end
 
-      -- Build ordered children and detect child renames
-      local ordered_children = {}
+      local has_child_duplicates = false
       for j = 1, #group.children do
-        local orig_child = orig_children[child_matched[j]]
-        table.insert(ordered_children, orig_child)
+        if child_matched[j] then
+          -- Matched to an original child
+          local orig_child = orig_children[child_matched[j]]
+          table.insert(ordered_children, orig_child)
 
-        if group.children[j].name ~= orig_child.name then
-          table.insert(renames, { old_name = orig_child.name, new_name = group.children[j].name })
+          if group.children[j].name ~= orig_child.name then
+            table.insert(renames, { old_name = orig_child.name, new_name = group.children[j].name })
+            child_existing_names[group.children[j].name] = true
+          end
+        else
+          -- Unmatched — this is a duplicate child
+          has_child_duplicates = true
+
+          -- Find template: look at the child directly above with the same prefix
+          local template_child = nil
+          for k = j - 1, 1, -1 do
+            if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
+              template_child = orig_children[child_matched[k]]
+              break
+            end
+          end
+          if not template_child then
+            for k = j + 1, #group.children do
+              if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
+                template_child = orig_children[child_matched[k]]
+                break
+              end
+            end
+          end
+          if not template_child then
+            for _, c in ipairs(orig_children) do
+              if c.display_type == group.children[j].prefix then
+                template_child = c
+                break
+              end
+            end
+          end
+
+          if not template_child then
+            return false, "could not find template for duplicate child in '" .. orig_entry.name .. "'", {}, nil
+          end
+
+          local new_child_name = next_suffix_name(template_child.name, child_existing_names)
+          child_existing_names[new_child_name] = true
+
+          local new_child_lines = rename_in_lines(template_child.lines, template_child.name, new_child_name)
+          table.insert(ordered_children, {
+            name = new_child_name,
+            display_type = template_child.display_type,
+            arity = template_child.arity,
+            start_row = template_child.start_row,
+            decl_start_row = template_child.decl_start_row,
+            end_row = template_child.end_row,
+            lines = new_child_lines,
+          })
         end
       end
 
@@ -530,8 +583,8 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         end
       end
 
-      -- Reconstruct if children were reordered or have new comments
-      if children_order_changed(child_matched, #orig_children) or has_child_new_comments then
+      -- Reconstruct if children were reordered, duplicated, or have new comments
+      if has_child_duplicates or children_order_changed(child_matched, #orig_children) or has_child_new_comments then
         local lp = lang.comment_prefix or "//"
         entry_copy.lines = reconstruct_parent(orig_entry, ordered_children, child_matched, group.children, lp)
       end

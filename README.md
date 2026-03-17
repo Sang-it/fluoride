@@ -4,7 +4,7 @@ A Neovim plugin that lets you view, reorder, and rename top-level code declarati
 
 ## Demo
 
-<video src="https://github.com/Sang-it/fluoride/raw/main/assets/demo.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/856e78c7-1124-45a4-850a-e6c95e8e2bc0" controls="controls" width="100%"></video>
 
 ## Features
 

@@ -152,15 +152,24 @@ local function process_siblings(siblings, lang, bufnr, is_decl_fn)
   local entries = {}
 
   for i, child in ipairs(siblings) do
+    -- Skip treesitter error nodes (incomplete/broken syntax)
+    if child:type() == "ERROR" then
+      goto continue_siblings
+    end
+
     if is_decl_fn(child) then
       -- Walk backwards to find leading comments
       local comment_sr = find_comment_start(siblings, i, comment_types)
       local decl_sr = select(1, child:range())
       local sr_override = (comment_sr < decl_sr) and comment_sr or nil
 
-      local entry = build_entry(child, lang, bufnr, sr_override)
-      table.insert(entries, entry)
+      local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
+      if ok and entry then
+        table.insert(entries, entry)
+      end
     end
+
+    ::continue_siblings::
   end
 
   return entries
@@ -205,39 +214,47 @@ function M.get_code_points(bufnr)
   local entries = {}
 
   for i, child in ipairs(all_children) do
+    -- Skip treesitter error nodes (incomplete/broken syntax)
+    if child:type() == "ERROR" then
+      goto continue_top
+    end
+
     if lang.is_declaration(child) then
       -- Walk backwards to find leading comments
       local comment_sr = find_comment_start(all_children, i, comment_types)
       local decl_sr = select(1, child:range())
       local sr_override = (comment_sr < decl_sr) and comment_sr or nil
 
-      local entry = build_entry(child, lang, bufnr, sr_override)
+      local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
+      if ok and entry then
+        -- Check if this node has nestable children (e.g., methods in a class/impl)
+        if lang.is_nestable and lang.get_body_node and lang.is_child_declaration then
+          if lang.is_nestable(child) then
+            local body = lang.get_body_node(child)
+            if body then
+              -- Collect all body children
+              local body_children = {}
+              for grandchild in body:iter_children() do
+                table.insert(body_children, grandchild)
+              end
 
-      -- Check if this node has nestable children (e.g., methods in a class/impl)
-      if lang.is_nestable and lang.get_body_node and lang.is_child_declaration then
-        if lang.is_nestable(child) then
-          local body = lang.get_body_node(child)
-          if body then
-            -- Collect all body children
-            local body_children = {}
-            for grandchild in body:iter_children() do
-              table.insert(body_children, grandchild)
-            end
+              -- Process children with comment attachment
+              local child_entries = process_siblings(body_children, lang, bufnr, function(n)
+                return lang.is_child_declaration(n)
+              end)
 
-            -- Process children with comment attachment
-            local child_entries = process_siblings(body_children, lang, bufnr, function(n)
-              return lang.is_child_declaration(n)
-            end)
-
-            if #child_entries > 0 then
-              entry.children = child_entries
+              if #child_entries > 0 then
+                entry.children = child_entries
+              end
             end
           end
         end
-      end
 
-      table.insert(entries, entry)
+        table.insert(entries, entry)
+      end
     end
+
+    ::continue_top::
   end
 
   return entries, lang

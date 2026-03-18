@@ -333,9 +333,15 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     -- Add the trailing gap from the original child
     local orig_idx = child_matched[i]
     local gap = child_trailing_gaps[orig_idx]
-    local is_enum = parent.display_type and parent.display_type:match("enum") ~= nil
-    if is_enum then
-      -- Enums: only emit gaps with real content (comments), keep members compact
+    local is_compact = parent.display_type and (
+      parent.display_type:match("enum") ~= nil
+      or parent.display_type:match("struct") ~= nil
+      or parent.display_type:match("union") ~= nil
+      or parent.display_type:match("interface") ~= nil
+      or parent.display_type == "type"
+    ) or false
+    if is_compact then
+      -- Compact types (enums, structs, unions): only emit gaps with real content (comments)
       if has_gap_content(gap) then
         for _, line in ipairs(gap) do
           table.insert(result, line)

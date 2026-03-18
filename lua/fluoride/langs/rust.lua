@@ -104,11 +104,21 @@ function M.get_name(node, bufnr)
 
   -- impl_item: impl Foo { ... } or impl Trait for Foo { ... }
   if node_type == "impl_item" then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    local first_line = text:match("^([^\n]*)")
+    -- Strip "impl" keyword and trailing "{"
+    first_line = first_line:gsub("^impl%s+", "")
+    first_line = first_line:gsub("%s*{%s*$", "")
+    first_line = vim.trim(first_line)
+    if #first_line > 50 then
+      first_line = first_line:sub(1, 47) .. "..."
+    end
+    if first_line ~= "" then
+      return first_line
+    end
+    -- Fallback to type node
     local type_node = node:field("type")[1]
-    local trait_node = node:field("trait")[1]
-    if trait_node and type_node then
-      return vim.treesitter.get_node_text(trait_node, bufnr) .. " for " .. vim.treesitter.get_node_text(type_node, bufnr)
-    elseif type_node then
+    if type_node then
       return vim.treesitter.get_node_text(type_node, bufnr)
     end
   end

@@ -123,7 +123,7 @@ local function parse_display_content(content, type_prefixes)
   return nil, strip_arity(trimmed)
 end
 
---- Three-pass matching of parsed items to original entries.
+--- Four-pass matching of parsed items to original entries.
 --- @param parsed table[] list of { prefix, name }
 --- @param originals table[] list of entries with .name and .display_type
 --- @return table matched map of new_index → original_index
@@ -132,10 +132,10 @@ local function match_entries(parsed, originals)
   local matched = {}
   local used = {}
 
-  -- Pass 1: exact name match
+  -- Pass 1: exact name + prefix match (disambiguates struct Foo vs impl Foo)
   for i, p in ipairs(parsed) do
     for j, entry in ipairs(originals) do
-      if not used[j] and p.name == entry.name then
+      if not used[j] and p.name == entry.name and p.prefix and p.prefix == entry.display_type then
         matched[i] = j
         used[j] = true
         break
@@ -143,7 +143,20 @@ local function match_entries(parsed, originals)
     end
   end
 
-  -- Pass 2: match by type prefix
+  -- Pass 2: exact name match (for entries with unique names)
+  for i, p in ipairs(parsed) do
+    if not matched[i] then
+      for j, entry in ipairs(originals) do
+        if not used[j] and p.name == entry.name then
+          matched[i] = j
+          used[j] = true
+          break
+        end
+      end
+    end
+  end
+
+  -- Pass 3: match by type prefix (for renamed entries)
   for i, p in ipairs(parsed) do
     if not matched[i] then
       for j, entry in ipairs(originals) do
@@ -156,7 +169,7 @@ local function match_entries(parsed, originals)
     end
   end
 
-  -- Pass 3: fallback
+  -- Pass 4: fallback
   for i, _ in ipairs(parsed) do
     if not matched[i] then
       for j, _ in ipairs(originals) do
@@ -383,31 +396,35 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   -- Re-attribute misplaced children to their correct parents.
   -- When a top-level entry is moved between a parent and its children,
   -- the positional grouping assigns children to the wrong parent.
-  -- Fix this by checking each child against the original parent membership.
-  local original_child_parent = {}
+  -- Uses display_type + name as a unique key to handle cases like
+  -- struct Counter and impl Counter having the same name.
+  local original_child_parent = {} -- child_name → parent_key (display_type + " " + name)
   for _, entry in ipairs(original_entries) do
     if entry.children then
+      local parent_key = entry.display_type .. " " .. entry.name
       for _, child in ipairs(entry.children) do
-        original_child_parent[child.name] = entry.name
+        original_child_parent[child.name] = parent_key
       end
     end
   end
 
-  -- Build a name → group index map for quick lookup
-  local group_by_name = {}
+  -- Build a parent_key → group index map for quick lookup
+  local group_by_key = {}
   for idx, group in ipairs(parsed_groups) do
-    group_by_name[group.name] = idx
+    local key = (group.prefix or "") .. " " .. group.name
+    group_by_key[key] = idx
   end
 
   -- Scan each group's children and re-attribute misplaced ones
   for i = #parsed_groups, 1, -1 do
     local group = parsed_groups[i]
+    local group_key = (group.prefix or "") .. " " .. group.name
     local correct_children = {}
     local misplaced = {}
 
     for _, child in ipairs(group.children) do
-      local orig_parent = original_child_parent[child.name]
-      if orig_parent == nil or orig_parent == group.name then
+      local orig_parent_key = original_child_parent[child.name]
+      if orig_parent_key == nil or orig_parent_key == group_key then
         -- Correct parent or new child (duplicate) — keep it
         table.insert(correct_children, child)
       else
@@ -420,8 +437,8 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
 
     -- Re-attach misplaced children to their correct parent group
     for _, child in ipairs(misplaced) do
-      local orig_parent = original_child_parent[child.name]
-      local target_idx = group_by_name[orig_parent]
+      local orig_parent_key = original_child_parent[child.name]
+      local target_idx = group_by_key[orig_parent_key]
       if target_idx then
         table.insert(parsed_groups[target_idx].children, child)
       end
@@ -657,23 +674,21 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
             end
           end
 
-          if not template_child then
-            return false, "could not find template for duplicate child in '" .. orig_entry.name .. "'", {}, nil, nil
+          if template_child then
+            local new_child_name = next_suffix_name(template_child.name, child_existing_names)
+            child_existing_names[new_child_name] = true
+
+            local new_child_lines = rename_in_lines(template_child.lines, template_child.name, new_child_name)
+            table.insert(ordered_children, {
+              name = new_child_name,
+              display_type = template_child.display_type,
+              arity = template_child.arity,
+              start_row = template_child.start_row,
+              decl_start_row = template_child.decl_start_row,
+              end_row = template_child.end_row,
+              lines = new_child_lines,
+            })
           end
-
-          local new_child_name = next_suffix_name(template_child.name, child_existing_names)
-          child_existing_names[new_child_name] = true
-
-          local new_child_lines = rename_in_lines(template_child.lines, template_child.name, new_child_name)
-          table.insert(ordered_children, {
-            name = new_child_name,
-            display_type = template_child.display_type,
-            arity = template_child.arity,
-            start_row = template_child.start_row,
-            decl_start_row = template_child.decl_start_row,
-            end_row = template_child.end_row,
-            lines = new_child_lines,
-          })
         end
       end
 

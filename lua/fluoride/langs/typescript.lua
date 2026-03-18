@@ -25,6 +25,7 @@ local DECLARATION_TYPES = {
   expression_statement = "expression",
   ambient_declaration = "declare",
   module = "namespace",
+  internal_module = "namespace",
   function_signature = "function",
 }
 
@@ -108,6 +109,7 @@ function M.get_name(node, bufnr)
     or node_type == "enum_declaration"
     or node_type == "type_alias_declaration"
     or node_type == "module"
+    or node_type == "internal_module"
   then
     local name_node = node:field("name")[1]
     if name_node then
@@ -168,8 +170,13 @@ function M.get_name(node, bufnr)
     return first_line
   end
 
-  -- For expression_statement: use first line
+  -- For expression_statement: check if it wraps an internal_module (namespace), otherwise use first line
   if node_type == "expression_statement" then
+    for child in node:iter_children() do
+      if child:type() == "internal_module" then
+        return M.get_name(child, bufnr)
+      end
+    end
     local text = vim.treesitter.get_node_text(node, bufnr)
     local first_line = text:match("^([^\n]*)")
     if #first_line > 40 then
@@ -361,6 +368,15 @@ function M.get_display_type(node, bufnr)
   if node_type == "call_signature" then return "call" end
   if node_type == "construct_signature" then return "new" end
 
+  -- expression_statement wrapping an internal_module (namespace)
+  if node_type == "expression_statement" then
+    for child in node:iter_children() do
+      if child:type() == "internal_module" then
+        return M.get_display_type(child, bufnr)
+      end
+    end
+  end
+
   -- Statement types
   local STATEMENT_MAP = {
     if_statement = "if",
@@ -480,11 +496,12 @@ function M.is_nestable(node)
     or t == "abstract_class_declaration"
     or t == "interface_declaration"
     or t == "enum_declaration"
-    or t == "module" then
+    or t == "module"
+    or t == "internal_module" then
     return true
   end
-  -- Handle export_statement wrapping a nestable declaration
-  if t == "export_statement" or t == "ambient_declaration" then
+  -- Handle export_statement, ambient_declaration, or expression_statement wrapping a nestable declaration
+  if t == "export_statement" or t == "ambient_declaration" or t == "expression_statement" then
     for child in node:iter_children() do
       if M.is_nestable(child) then
         return true
@@ -520,15 +537,15 @@ function M.get_body_node(node)
       end
     end
   end
-  if t == "module" then
+  if t == "module" or t == "internal_module" then
     for child in node:iter_children() do
       if child:type() == "statement_block" then
         return child
       end
     end
   end
-  -- Handle export_statement / ambient_declaration wrapping a nestable declaration
-  if t == "export_statement" or t == "ambient_declaration" then
+  -- Handle export_statement / ambient_declaration / expression_statement wrapping a nestable declaration
+  if t == "export_statement" or t == "ambient_declaration" or t == "expression_statement" then
     for child in node:iter_children() do
       local body = M.get_body_node(child)
       if body then
@@ -572,6 +589,7 @@ local NAMESPACE_CHILD_TYPES = {
   expression_statement = true,
   ambient_declaration = true,
   module = true,
+  internal_module = true,
 }
 
 --- Check if a child node inside a nestable parent is a declaration.

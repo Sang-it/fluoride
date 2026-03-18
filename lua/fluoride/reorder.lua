@@ -186,6 +186,21 @@ local function match_entries(parsed, originals)
   return matched, nil
 end
 
+--- Check if a gap table contains any non-empty content.
+--- @param gap table|nil gap lines table
+--- @return boolean true if gap has at least one non-empty line
+local function has_gap_content(gap)
+  if not gap or #gap == 0 then
+    return false
+  end
+  for _, line in ipairs(gap) do
+    if line and #line > 0 then
+      return true
+    end
+  end
+  return false
+end
+
 --- Check if children order changed compared to original.
 --- @param matched table map of new_index → original_index
 --- @param count number number of children
@@ -318,14 +333,9 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     -- Add the trailing gap from the original child
     local orig_idx = child_matched[i]
     local gap = child_trailing_gaps[orig_idx]
-    if gap and #gap > 0 then
+    if has_gap_content(gap) then
       for _, line in ipairs(gap) do
         table.insert(result, line)
-      end
-    else
-      -- No original gap — add a blank line (unless it's the last child)
-      if i < #ordered_children then
-        table.insert(result, "")
       end
     end
   end

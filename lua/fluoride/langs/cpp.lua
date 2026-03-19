@@ -498,6 +498,14 @@ function M.is_nestable(node)
       end
     end
   end
+  -- Handle template_declaration wrapping a nestable type (e.g., template<T> class Box { ... })
+  if t == "template_declaration" then
+    for child in node:iter_children() do
+      if M.is_nestable(child) then
+        return true
+      end
+    end
+  end
   return false
 end
 
@@ -541,6 +549,15 @@ function M.get_body_node(node)
             return sub
           end
         end
+      end
+    end
+  end
+  -- Handle template_declaration wrapping a nestable type
+  if t == "template_declaration" then
+    for child in node:iter_children() do
+      local body = M.get_body_node(child)
+      if body then
+        return body
       end
     end
   end

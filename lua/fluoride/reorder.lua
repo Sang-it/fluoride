@@ -631,13 +631,18 @@ local function process_children_recursive(entry_copy, orig_entry, group, state)
     end
   end
 
-  -- Check if any child has new comments
+  -- Check if any child has new comments, and track annotated children for highlighting
   local has_child_new_comments = false
-  for _, child_group in ipairs(group.children) do
+  for ci, child_group in ipairs(group.children) do
     if child_group.new_comments and #child_group.new_comments > 0 then
       has_child_new_comments = true
       state.changes_made = true
-      break
+      if child_matched[ci] then
+        local child = ordered_children[ci]
+        if child then
+          table.insert(state.annotated, { name = child.name, child_index = ci, owner_entry = entry_copy })
+        end
+      end
     end
   end
 
@@ -725,14 +730,46 @@ local function process_children_recursive(entry_copy, orig_entry, group, state)
         if r.owner_entry == oc then
           local child_start_in_parent
           if child_offsets and child_offsets[ci] then
-            -- Reconstruction happened: use tracked offset
             child_start_in_parent = child_offsets[ci].start_offset
           else
-            -- No reconstruction: compute from original positions
             child_start_in_parent = oc.start_row - entry_copy.start_row
           end
           r.rename_line = child_start_in_parent + r.rename_line
           r.owner_entry = entry_copy
+          break
+        end
+      end
+    end
+  end
+
+  -- Resolve annotated child positions relative to entry_copy.lines
+  for _, a in ipairs(state.annotated) do
+    if a.child_index and a.owner_entry == entry_copy then
+      -- Compute decl_row as offset within entry_copy.lines
+      local ci = a.child_index
+      if child_offsets and child_offsets[ci] then
+        a.decl_row = child_offsets[ci].decl_offset
+      else
+        local child = ordered_children[ci]
+        if child then
+          a.decl_row = child.decl_start_row - entry_copy.start_row
+        end
+      end
+      a.child_index = nil
+    end
+    -- Adjust sub-child annotations: if owner_entry is one of the ordered_children,
+    -- shift offset to be relative to entry_copy
+    if a.owner_entry and a.decl_row then
+      for ci, oc in ipairs(ordered_children) do
+        if a.owner_entry == oc then
+          local child_start_in_parent
+          if child_offsets and child_offsets[ci] then
+            child_start_in_parent = child_offsets[ci].start_offset
+          else
+            child_start_in_parent = oc.start_row - entry_copy.start_row
+          end
+          a.decl_row = child_start_in_parent + a.decl_row
+          a.owner_entry = entry_copy
           break
         end
       end
@@ -1041,7 +1078,8 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     end
   end
 
-  local state = { renames = renames, allow_deletions = allow_deletions, lang = lang, changes_made = changes_made }
+  local annotated = {} -- children with new // comments, tracked for highlight after save
+  local state = { renames = renames, annotated = annotated, allow_deletions = allow_deletions, lang = lang, changes_made = changes_made }
 
   -- Build ordered entries, handling child reordering and duplicates
   local ordered_entries = {}
@@ -1304,6 +1342,40 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   for _, r in ipairs(renames) do
     if r.rename_line then
       table.insert(affected_rows, { new_name = r.new_name, decl_row = r.rename_line })
+    end
+  end
+
+  -- Include entries that received new // comment annotations (top-level and children)
+  for i, entry in ipairs(ordered_entries) do
+    local group = parsed_groups[i]
+    if group.new_comments and #group.new_comments > 0 then
+      local decl_row
+      if state.changes_made then
+        local base = entry_start_rows[i]
+        local comment_line_count = entry.decl_start_row - entry.start_row
+        local new_comment_count = #group.new_comments
+        decl_row = base + comment_line_count + new_comment_count
+      else
+        decl_row = entry.decl_start_row
+      end
+      table.insert(affected_rows, { new_name = entry.name, decl_row = decl_row })
+    end
+  end
+
+  -- Resolve child annotation positions to absolute rows
+  for _, a in ipairs(annotated) do
+    if a.owner_entry and a.decl_row then
+      if state.changes_made then
+        for ei, oe in ipairs(ordered_entries) do
+          if a.owner_entry == oe then
+            a.decl_row = entry_start_rows[ei] + a.decl_row
+            break
+          end
+        end
+      else
+        a.decl_row = a.owner_entry.start_row + a.decl_row
+      end
+      table.insert(affected_rows, { new_name = a.name, decl_row = a.decl_row })
     end
   end
 

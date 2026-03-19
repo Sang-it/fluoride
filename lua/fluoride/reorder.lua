@@ -497,7 +497,14 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
       local node = { prefix = prefix, name = name, children = {}, new_comments = pending_comments, access = access_at_depth[depth] }
       pending_comments = {}
 
+      -- Clear access specifiers at deeper depths (new parent resets child access)
+      for d = depth + 1, #access_at_depth do
+        access_at_depth[d] = nil
+      end
+
       if depth == 0 then
+        -- Also clear access at depth 0 for new top-level entries
+        access_at_depth[0] = nil
         table.insert(parsed_groups, node)
         stack = { [0] = node }
       else

@@ -5,5 +5,7 @@
     "strict": true,
     "outDir": "./dist"
   },
-  "include": ["app.ts"]
+  "include": [
+    "app.ts"
+  ]
 }

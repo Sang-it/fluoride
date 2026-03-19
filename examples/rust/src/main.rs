@@ -1,108 +1,234 @@
-use std::collections::HashMap;
+// Fluoride Rust test file — comprehensive syntax coverage
+// Covers: fn, pub fn, struct, enum, union, impl, trait, type, const, static,
+// mod, macro_rules!, macro invocation, extern, expression
+
 use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-const MAX_ITEMS: usize = 1000;
+// --- Functions ---
 
-static APP_NAME: &str = "fluoride-example";
-
-pub enum Status {
-    Active,
-    Inactive,
-    Archived,
+fn greet(name: &str) -> String {
+    format!("Hello, {}", name)
 }
 
-pub struct Item {
-    id: u64,
-    name: String,
-    tags: Vec<String>,
+fn no_args() {
+    println!("no args");
 }
 
-pub trait Searchable {
-    fn matches(&self, query: &str) -> bool;
-    fn relevance(&self, query: &str) -> f64;
+fn multi_args(a: i32, b: &str, c: bool) -> String {
+    format!("{} {} {}", a, b, c)
 }
 
-impl Searchable for Item {
-    fn matches(&self, query: &str) -> bool {
-        self.name.contains(query) || self.tags.iter().any(|t| t.contains(query))
+pub fn public_greet(name: &str) -> String {
+    greet(name)
+}
+
+pub fn public_no_args() {
+    println!("public no args");
+}
+
+// --- Structs ---
+
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+struct Color(u8, u8, u8);
+
+pub struct PubPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub struct Config {
+    pub debug: bool,
+    pub timeout: u32,
+    pub host: String,
+}
+
+// --- Enums ---
+
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+enum Shape {
+    Circle(f64),
+    Rectangle(f64, f64),
+    Triangle { base: f64, height: f64 },
+}
+
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+// --- Union ---
+
+union IntOrFloat {
+    i: i32,
+    f: f32,
+}
+
+// --- Impl blocks ---
+
+impl Point {
+    fn new(x: f64, y: f64) -> Self {
+        Point { x, y }
     }
 
-    fn relevance(&self, query: &str) -> f64 {
-        if self.name == query {
-            1.0
-        } else if self.name.contains(query) {
-            0.5
-        } else {
-            0.1
+    fn distance(&self, other: &Point) -> f64 {
+        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
+    }
+
+    fn translate(&mut self, dx: f64, dy: f64) {
+        self.x += dx;
+        self.y += dy;
+    }
+
+    const ORIGIN: Point = Point { x: 0.0, y: 0.0 };
+
+    type Coord = f64;
+}
+
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
+}
+
+impl Shape {
+    fn area(&self) -> f64 {
+        match self {
+            Shape::Circle(r) => std::f64::consts::PI * r * r,
+            Shape::Rectangle(w, h) => w * h,
+            Shape::Triangle { base, height } => 0.5 * base * height,
+        }
+    }
+
+    fn describe(&self) -> &str {
+        match self {
+            Shape::Circle(_) => "circle",
+            Shape::Rectangle(_, _) => "rectangle",
+            Shape::Triangle { .. } => "triangle",
         }
     }
 }
 
-impl fmt::Display for Item {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.name, self.id)
+// --- Traits ---
+
+trait Drawable {
+    fn draw(&self);
+
+    fn area(&self) -> f64;
+
+    fn color(&self) -> &str {
+        "black"
     }
 }
 
-pub struct Inventory {
-    items: HashMap<u64, Item>,
-    next_id: u64,
+pub trait Serializable {
+    fn serialize(&self) -> String;
+
+    fn deserialize(data: &str) -> Self;
 }
 
-impl Inventory {
-    pub fn new() -> Self {
-        Self {
-            items: HashMap::new(),
-            next_id: 1,
-        }
+// --- Type aliases ---
+
+type Result<T> = std::result::Result<T, String>;
+
+pub type PubResult = Result<()>;
+
+// --- Constants ---
+
+const MAX_SIZE: u32 = 100;
+
+const DEFAULT_NAME: &str = "unknown";
+
+pub const PUB_MAX: u32 = 200;
+
+// --- Statics ---
+
+static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+pub static PUB_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+// --- Modules ---
+
+mod utils {
+    pub fn helper() -> &'static str {
+        "help"
     }
 
-    pub fn add(&mut self, name: &str, tags: Vec<String>) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.items.insert(
-            id,
-            Item {
-                id,
-                name: name.to_string(),
-                tags,
-            },
-        );
-        id
+    pub struct InnerStruct {
+        pub x: i32,
+        pub y: i32,
     }
 
-    pub fn search(&self, query: &str) -> Vec<&Item> {
-        let mut results: Vec<&Item> = self
-            .items
-            .values()
-            .filter(|item| item.matches(query))
-            .collect();
-        results.sort_by(|a, b| b.relevance(query).partial_cmp(&a.relevance(query)).unwrap());
-        results
+    pub enum InnerEnum {
+        A,
+        B,
+    }
+
+    pub const INNER_CONST: i32 = 42;
+}
+
+pub mod pub_utils {
+    pub fn public_helper() -> bool {
+        true
+    }
+
+    pub mod nested {
+        pub fn deep_helper() {}
     }
 }
 
-type ItemId = u64;
+// --- Macros ---
 
-pub fn format_items(items: &[&Item]) -> String {
-    items
-        .iter()
-        .map(|item| item.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-macro_rules! log {
-    ($level:expr, $($arg:tt)*) => {
-        println!("[{}] {}", $level, format!($($arg)*));
+macro_rules! say_hello {
+    () => {
+        println!("Hello!");
+    };
+    ($name:expr) => {
+        println!("Hello, {}!", $name);
     };
 }
 
-fn main() {
-    let mut inventory = Inventory::new();
-    inventory.add("Widget", vec!["hardware".into(), "small".into()]);
-    inventory.add("Gadget", vec!["electronics".into()]);
+macro_rules! create_map {
+    ($($key:expr => $val:expr),*) => {{
+        let mut map = std::collections::HashMap::new();
+        $(map.insert($key, $val);)*
+        map
+    }};
+}
 
-    let results = inventory.search("Widget");
-    log!("INFO", "Found: {}", format_items(&results));
+// --- Extern ---
+
+extern "C" {
+    fn abs(input: i32) -> i32;
+}
+
+// --- Main ---
+
+fn main() {
+    let p = Point::new(1.0, 2.0);
+    println!("{}", p);
+
+    let s = Shape::Circle(5.0);
+    println!("{} area: {}", s.describe(), s.area());
+
+    say_hello!();
+    say_hello!("World");
+
+    let map = create_map!("a" => 1, "b" => 2);
+    println!("{:?}", map);
+
+    println!("{}", greet("Rust"));
+    COUNTER.fetch_add(1, Ordering::SeqCst);
 }

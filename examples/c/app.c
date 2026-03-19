@@ -1,102 +1,146 @@
+// Fluoride C test file — comprehensive syntax coverage
+// Covers: function, forward declaration, variable, struct, enum, union,
+// typedef, #define, expression
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_ENTRIES 256
+// --- Preprocessor defines ---
 
-#define MAX_NAME_LEN 64
+#define DEFAULT_NAME "unknown"
 
-typedef struct {
-    Entry items[MAX_ENTRIES];
-    int count;
-} Registry;
+#define MAX_SIZE 100
 
-enum SortOrder {
-    SORT_ASC,
-    SORT_DESC,
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+#define SQUARE(x) ((x) * (x))
+
+#define CLAMP(val, lo, hi) ((val) < (lo) ? (lo) : ((val) > (hi) ? (hi) : (val)))
+
+// --- Forward declarations ---
+
+void greet(const char *name);
+
+int add(int a, int b);
+
+void process(void);
+
+// --- Functions ---
+
+void greet(const char *name) {
+    printf("Hello, %s\n", name);
+}
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int no_args(void) {
+    return 42;
+}
+
+int multi_args(int a, int b, int c, int d) {
+    return a + b + c + d;
+}
+
+void process(void) {
+    printf("processing...\n");
+}
+
+// Pointer return type
+int *create_array(int size) {
+    return (int *)malloc(size * sizeof(int));
+}
+
+// --- Variables ---
+
+int global_counter = 0;
+
+const char *app_name = "fluoride";
+
+static int internal_state = 0;
+
+// --- Structs ---
+
+struct Point {
+    int x;
+    int y;
 };
 
-static int next_id = 1;
+struct Color {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+};
 
-const char *APP_VERSION = "1.0.0";
+struct Config {
+    int debug;
+    int timeout;
+    char host[256];
+    int port;
+};
+
+// --- Enums ---
+
+enum Direction {
+    DIR_UP,
+    DIR_DOWN,
+    DIR_LEFT,
+    DIR_RIGHT,
+};
+
+enum LogLevel {
+    LOG_DEBUG = 0,
+    LOG_INFO = 1,
+    LOG_WARN = 2,
+    LOG_ERROR = 3,
+};
+
+// --- Unions ---
+
+union IntOrFloat {
+    int i;
+    float f;
+};
+
+union Data {
+    int integer;
+    float decimal;
+    char text[32];
+};
+
+// --- Typedefs ---
+
+typedef unsigned int uint;
 
 typedef struct {
-    int id;
-    char name[MAX_NAME_LEN];
-    double value;
-} Entry;
+    float x;
+    float y;
+} Vec2;
 
-void registry_init(Registry *reg) {
-    reg->count = 0;
-}
+typedef enum {
+    STATUS_OK,
+    STATUS_ERROR,
+    STATUS_PENDING,
+} Status;
 
-int registry_add(Registry *reg, const char *name, double value) {
-    if (reg->count >= MAX_ENTRIES) {
-        return -1;
-    }
-    Entry *entry = &reg->items[reg->count];
-    entry->id = next_id++;
-    strncpy(entry->name, name, MAX_NAME_LEN - 1);
-    entry->name[MAX_NAME_LEN - 1] = '\0';
-    entry->value = value;
-    reg->count++;
-    return entry->id;
-}
+typedef void (*Callback)(int, const char *);
 
-Entry *registry_find(Registry *reg, int id) {
-    for (int i = 0; i < reg->count; i++) {
-        if (reg->items[i].id == id) {
-            return &reg->items[i];
-        }
-    }
-    return NULL;
-}
+// --- Main ---
 
-static int compare_asc(const void *a, const void *b) {
-    const Entry *ea = (const Entry *)a;
-    const Entry *eb = (const Entry *)b;
-    if (ea->value < eb->value) return -1;
-    if (ea->value > eb->value) return 1;
-    return 0;
-}
+int main(int argc, char *argv[]) {
+    struct Point p = {1, 2};
+    printf("Point: (%d, %d)\n", p.x, p.y);
 
-static int compare_desc(const void *a, const void *b) {
-    return -compare_asc(a, b);
-}
+    greet("World");
+    printf("add: %d\n", add(2, 3));
+    printf("no_args: %d\n", no_args());
+    printf("SQUARE(5): %d\n", SQUARE(5));
+    printf("MAX(3, 7): %d\n", MAX(3, 7));
 
-void registry_sort(Registry *reg, enum SortOrder order) {
-    if (order == SORT_ASC) {
-        qsort(reg->items, reg->count, sizeof(Entry), compare_asc);
-    } else {
-        qsort(reg->items, reg->count, sizeof(Entry), compare_desc);
-    }
-}
+    global_counter++;
 
-void registry_print(const Registry *reg) {
-    for (int i = 0; i < reg->count; i++) {
-        printf("[%d] %s = %.2f\n", reg->items[i].id, reg->items[i].name, reg->items[i].value);
-    }
-}
-
-double registry_total(const Registry *reg) {
-    double sum = 0.0;
-    for (int i = 0; i < reg->count; i++) {
-        sum += reg->items[i].value;
-    }
-    return sum;
-}
-
-int main(void) {
-    Registry reg;
-    registry_init(&reg);
-
-    registry_add(&reg, "Alpha", 3.14);
-    registry_add(&reg, "Beta", 2.71);
-    registry_add(&reg, "Gamma", 1.41);
-
-    registry_sort(&reg, SORT_ASC);
-    registry_print(&reg);
-
-    printf("Total: %.2f\n", registry_total(&reg));
     return 0;
 }

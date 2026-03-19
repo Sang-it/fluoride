@@ -1,64 +1,192 @@
-import fs from "fs";
-import path from "path";
+// Fluoride JavaScript test file — comprehensive syntax coverage
+// Covers: functions, generators, const/let/var, class, export, control flow, expressions
 
-let requestCount = 0;
+import { EventEmitter } from "events";
 
-const CACHE_TTL = 60 * 1000;
+// --- Functions ---
+
+function greet(name) {
+  return "Hello, " + name;
+}
+
+function noArgs() {
+  console.log("no args");
+}
+
+function multiArgs(a, b, c) {
+  return a + b + c;
+}
+
+// --- Generator functions ---
+
+function* counter() {
+  let i = 0;
+  while (true) {
+    yield i++;
+  }
+}
+
+function* fibonacci() {
+  let a = 0,
+    b = 1;
+  while (true) {
+    yield a;
+    [a, b] = [b, a + b];
+  }
+}
+
+// --- Variable declarations ---
+
+const MAX_RETRIES = 3;
+
+const PI = 3.14159;
+
+let mutableCounter = 0;
+
+let status = "idle";
 
 var legacyFlag = true;
 
-function loadConfig(filePath) {
-  const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw);
-}
+var oldConfig = { debug: false };
 
-class TaskQueue {
-  constructor() {
-    this.tasks = [];
-    this.running = false;
-  }
+// Arrow function as const
+const add = (a, b) => a + b;
 
-  enqueue(task) {
-    this.tasks.push(task);
-    if (!this.running) this.process();
-  }
+// Arrow function single param
+const double = (x) => x * 2;
 
-  async process() {
-    this.running = true;
-    while (this.tasks.length > 0) {
-      const task = this.tasks.shift();
-      await task();
-      requestCount++;
-    }
-    this.running = false;
-  }
-}
-
-const debounce = (fn, delay) => {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
+// Regular function as const
+const multiply = function(a, b) {
+  return a * b;
 };
 
-export function formatBytes(bytes) {
-  const units = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) {
-    bytes /= 1024;
-    i++;
+// Generator as const
+const range = function*(start, end) {
+  for (let i = start; i < end; i++) {
+    yield i;
   }
-  return `${bytes.toFixed(1)} ${units[i]}`;
+};
+
+// --- Class with all member types ---
+
+class Animal {
+  // Field with initializer
+  name = "unknown";
+
+  // Static field
+  static count = 0;
+
+  // Constructor
+  constructor(name) {
+    this.name = name;
+    Animal.count++;
+  }
+
+  // Instance method
+  speak() {
+    return this.name + " makes a sound";
+  }
+
+  // Method with params
+  greet(other, loudly) {
+    return loudly ? "HI " + other.name + "!" : "hi " + other.name;
+  }
+
+  // Getter
+  get displayName() {
+    return this.name.toUpperCase();
+  }
+
+  // Setter
+  set displayName(value) {
+    this.name = value.toLowerCase();
+  }
+
+  // Static method
+  static create(name) {
+    return new Animal(name);
+  }
+
+  // Static block
+  static {
+    console.log("Animal class loaded");
+  }
 }
 
-export const VERSION = "1.0.0";
+// Inheritance
+class Dog extends Animal {
+  constructor(name, breed) {
+    super(name);
+    this.breed = breed;
+  }
 
-
-function main() {
-  const config = loadConfig("config.json");
-  const queue = new TaskQueue();
-  queue.enqueue(() => console.log("Ready"));
+  speak() {
+    return this.name + " barks";
+  }
 }
 
-main();
+// --- Export statements ---
+
+export function exportedFunction(x) {
+  return x * 2;
+}
+
+export const EXPORTED_CONST = 42;
+
+export let exportedLet = "mutable export";
+
+export class ExportedClass {
+  value = 0;
+
+  getValue() {
+    return this.value;
+  }
+}
+
+export default {
+  key: "value",
+  version: 1,
+};
+
+// --- Control flow statements ---
+
+if (mutableCounter > 0) {
+  console.log("positive");
+}
+
+while (mutableCounter < 10) {
+  mutableCounter++;
+}
+
+for (let i = 0; i < 10; i++) {
+  console.log(i);
+}
+
+for (const key in { a: 1, b: 2 }) {
+  console.log(key);
+}
+
+switch (mutableCounter) {
+  case 0:
+    break;
+  case 1:
+    break;
+  default:
+    break;
+}
+
+try {
+  throw new Error("test");
+} catch (e) {
+  console.error(e);
+}
+
+do {
+  mutableCounter++;
+} while (mutableCounter < 5);
+
+// --- Expression statements ---
+
+console.log("expression statement at top level");
+
+void 0;

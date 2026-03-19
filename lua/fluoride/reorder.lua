@@ -973,7 +973,13 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         end
 
         if decl_line_text and decl_row_in_parent then
-          local pattern = "%f[%w_]" .. vim.pesc(r.old_name) .. "%f[^%w_]"
+          -- For dotted/colon names (e.g., Animal.Speak, M.greet), search for the last segment
+          local search_name = r.old_name
+          local sep_pos = search_name:find("[%.:]([^%.:]*)$")
+          if sep_pos then
+            search_name = search_name:sub(sep_pos + 1)
+          end
+          local pattern = "%f[%w_]" .. vim.pesc(search_name) .. "%f[^%w_]"
           local col = decl_line_text:find(pattern)
           if col then
             r.rename_line = decl_row_in_parent
@@ -1236,35 +1242,56 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     table.insert(result, line)
   end
 
-  -- Resolve rename positions to absolute rows in the result buffer.
+  -- Resolve rename positions.
+  -- When changes_made is true, positions are relative to `result` (the reconstructed buffer).
+  -- When changes_made is false, use original entry positions directly (result may differ from source).
   for _, r in ipairs(renames) do
     if r.owner_entry and r.rename_line then
       -- Child rename: owner_entry should be a top-level ordered_entry after
       -- offset adjustments propagated up through process_children_recursive.
-      -- Find which top-level entry it is and add its base row.
-      for ei, oe in ipairs(ordered_entries) do
-        if r.owner_entry == oe then
-          r.rename_line = entry_start_rows[ei] + r.rename_line
-          break
+      if changes_made then
+        -- Find which top-level entry it is and add its base row from result.
+        for ei, oe in ipairs(ordered_entries) do
+          if r.owner_entry == oe then
+            r.rename_line = entry_start_rows[ei] + r.rename_line
+            break
+          end
         end
+      else
+        -- No changes: use original entry's start_row directly
+        r.rename_line = r.owner_entry.start_row + r.rename_line
       end
       r.owner_entry = nil
     elseif r.top_level_index then
-      -- Top-level rename: compute from entry_start_rows
+      -- Top-level rename
       local ei = r.top_level_index
       local entry = ordered_entries[ei]
-      local base = entry_start_rows[ei]
-      if base and entry then
-        local new_comment_count = 0
-        local group = parsed_groups[ei]
-        if group.new_comments and #group.new_comments > 0 then
-          new_comment_count = #group.new_comments
+      if entry then
+        local decl_line_text
+        if changes_made then
+          local base = entry_start_rows[ei]
+          local new_comment_count = 0
+          local group = parsed_groups[ei]
+          if group.new_comments and #group.new_comments > 0 then
+            new_comment_count = #group.new_comments
+          end
+          local decl_offset = entry.decl_start_row - entry.start_row
+          r.rename_line = base + decl_offset + new_comment_count
+          decl_line_text = result[r.rename_line + 1]
+        else
+          -- No changes: use original position directly
+          r.rename_line = entry.decl_start_row
+          local source_lines = vim.api.nvim_buf_get_lines(source_bufnr, entry.decl_start_row, entry.decl_start_row + 1, false)
+          decl_line_text = source_lines[1]
         end
-        local decl_offset = entry.decl_start_row - entry.start_row
-        r.rename_line = base + decl_offset + new_comment_count
-        local decl_line_text = result[r.rename_line + 1]
         if decl_line_text then
-          local pattern = "%f[%w_]" .. vim.pesc(r.old_name) .. "%f[^%w_]"
+          -- For dotted/colon names, search for the last segment
+          local search_name = r.old_name
+          local sep_pos = search_name:find("[%.:]([^%.:]*)$")
+          if sep_pos then
+            search_name = search_name:sub(sep_pos + 1)
+          end
+          local pattern = "%f[%w_]" .. vim.pesc(search_name) .. "%f[^%w_]"
           local col = decl_line_text:find(pattern)
           if col then
             r.rename_col = col - 1

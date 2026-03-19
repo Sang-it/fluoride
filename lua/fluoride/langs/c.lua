@@ -216,6 +216,13 @@ function M.get_display_type(node, bufnr)
   end
 
   if node_type == "type_definition" then
+    -- Check if typedef wraps a struct/enum/union (e.g., "typedef struct { ... } Name;")
+    for child in node:iter_children() do
+      local ct = child:type()
+      if ct == "struct_specifier" then return "typedef struct" end
+      if ct == "enum_specifier" then return "typedef enum" end
+      if ct == "union_specifier" then return "typedef union" end
+    end
     return "typedef"
   end
 
@@ -346,8 +353,8 @@ function M.is_nestable(node)
   if t == "namespace_definition" then
     return true
   end
-  -- Handle bare declarations wrapping struct/enum/union (e.g., "enum Foo { ... };")
-  if t == "declaration" then
+  -- Handle bare declarations or typedefs wrapping struct/enum/union (e.g., "enum Foo { ... };", "typedef struct { ... } Name;")
+  if t == "declaration" or t == "type_definition" then
     for child in node:iter_children() do
       local ct = child:type()
       if ct == "struct_specifier" or ct == "enum_specifier" or ct == "union_specifier" then
@@ -386,8 +393,8 @@ function M.get_body_node(node)
       end
     end
   end
-  -- Handle bare declarations wrapping struct/enum/union
-  if t == "declaration" then
+  -- Handle bare declarations or typedefs wrapping struct/enum/union
+  if t == "declaration" or t == "type_definition" then
     for child in node:iter_children() do
       local ct = child:type()
       if ct == "struct_specifier" or ct == "union_specifier" then

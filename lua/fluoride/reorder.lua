@@ -850,8 +850,13 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
           end
         end
 
-        -- Detect rename AFTER recursion so child_copy has final lines
-        if group.children[j].name ~= orig_child.name then
+        -- Detect rename AFTER recursion so child_copy has final lines.
+        -- Skip renames for non-renameable types (expressions, call signatures, etc.)
+        local CHILD_NON_RENAMEABLE = {
+          ["expression"] = true, ["call"] = true, ["index"] = true,
+          ["static block"] = true, ["static_assert"] = true,
+        }
+        if group.children[j].name ~= orig_child.name and not CHILD_NON_RENAMEABLE[orig_child.display_type] then
           local rename_entry = { old_name = orig_child.name, new_name = group.children[j].name, child_index = j }
           table.insert(renames, rename_entry)
           child_existing_names[group.children[j].name] = true
@@ -1105,10 +1110,18 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
       end
     end
 
-    -- Detect top-level rename AFTER children are processed so entry_copy has final lines
+    -- Detect top-level rename AFTER children are processed so entry_copy has final lines.
+    -- Skip renames for non-renameable types (control flow, expressions) — their display
+    -- names are descriptive text, not symbol identifiers.
+    local NON_RENAMEABLE = {
+      ["if"] = true, ["while"] = true, ["for"] = true, ["switch"] = true,
+      ["try"] = true, ["do"] = true, ["with"] = true, ["select"] = true,
+      ["assert"] = true, ["expression"] = true, ["call"] = true,
+      ["go"] = true, ["defer"] = true, ["repeat"] = true,
+    }
     if parent_matched[i] then
       local p = parent_parsed[i]
-      if p.name ~= entry_copy.name then
+      if p.name ~= entry_copy.name and not NON_RENAMEABLE[entry_copy.display_type] then
         table.insert(renames, { old_name = entry_copy.name, new_name = p.name, top_level_index = i })
         existing_names[p.name] = true
       end

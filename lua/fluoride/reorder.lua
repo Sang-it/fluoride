@@ -469,6 +469,7 @@ local NON_RENAMEABLE = {
   ["try"] = true, ["do"] = true, ["with"] = true, ["select"] = true,
   ["assert"] = true, ["expression"] = true, ["call"] = true,
   ["go"] = true, ["defer"] = true, ["repeat"] = true,
+  ["#ifndef"] = true, ["#ifdef"] = true, ["#if"] = true,
 }
 
 --- Recursive function to process children at any depth.
@@ -1338,11 +1339,10 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     end
   end
 
-  -- Build affected_rows from annotated renames — use exact row positions
+  -- Build affected_rows from renames — use exact row positions when available,
+  -- otherwise fall back to approximate matching by name alone
   for _, r in ipairs(renames) do
-    if r.rename_line then
-      table.insert(affected_rows, { new_name = r.new_name, decl_row = r.rename_line })
-    end
+    table.insert(affected_rows, { new_name = r.new_name, decl_row = r.rename_line or -1 })
   end
 
   -- Include entries that received new // comment annotations (top-level and children)

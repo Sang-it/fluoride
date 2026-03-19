@@ -214,6 +214,27 @@ local function extract_children_recursive(entry, node, lang, bufnr)
     table.insert(body_children, grandchild)
   end
 
+  -- For #ifndef include guards, filter out the #define that matches the guard name
+  if lang.get_preproc_guard_name then
+    local guard_name = lang.get_preproc_guard_name(node, bufnr)
+    if guard_name then
+      local filtered = {}
+      for _, child in ipairs(body_children) do
+        local skip = false
+        if child:type() == "preproc_def" then
+          local name_node = child:field("name")[1]
+          if name_node and vim.treesitter.get_node_text(name_node, bufnr) == guard_name then
+            skip = true
+          end
+        end
+        if not skip then
+          table.insert(filtered, child)
+        end
+      end
+      body_children = filtered
+    end
+  end
+
   -- Process children with comment attachment
   local child_entries, child_nodes = process_siblings(body_children, lang, bufnr, function(n)
     return lang.is_child_declaration(n)

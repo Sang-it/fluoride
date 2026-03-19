@@ -12,13 +12,10 @@ M.comment_prefix = "//"
 local SKIP_TYPES = {
   comment = true,
   preproc_include = true,
-  preproc_ifdef = true,
-  preproc_ifndef = true,
-  preproc_if = true,
-  preproc_else = true,
-  preproc_endif = true,
   preproc_call = true,
   preproc_pragma = true,
+  preproc_else = true,
+  preproc_endif = true,
   linkage_specification = true,
   using_declaration = true,
   import_declaration = true,
@@ -48,6 +45,10 @@ M.highlights = {
   ["static_assert"] = { prefix = "Keyword",  name = "Identifier" },
   ["export"]        = { prefix = "Keyword",  name = "Identifier" },
   ["expression"]    = { prefix = "Keyword",  name = "Identifier" },
+  -- Preprocessor conditionals
+  ["#ifndef"]       = { prefix = "PreProc",  name = "Identifier" },
+  ["#ifdef"]        = { prefix = "PreProc",  name = "Identifier" },
+  ["#if"]           = { prefix = "PreProc",  name = "Identifier" },
   -- Children
   ["field"]         = { prefix = "Keyword",  name = "Identifier" },
   ["enumerator"]    = { prefix = "Type",     name = "Identifier" },
@@ -283,6 +284,27 @@ function M.get_name(node, bufnr)
     end
   end
 
+  -- Preprocessor conditionals
+  if node_type == "preproc_ifdef" then
+    for child in node:iter_children() do
+      if child:type() == "identifier" then
+        return vim.treesitter.get_node_text(child, bufnr)
+      end
+    end
+    return "<guard>"
+  end
+  if node_type == "preproc_if" then
+    for child in node:iter_children() do
+      local ct = child:type()
+      if ct ~= "#if" then
+        local text = vim.treesitter.get_node_text(child, bufnr)
+        if #text > 40 then text = text:sub(1, 37) .. "..." end
+        return text
+      end
+    end
+    return "<condition>"
+  end
+
   return "[unknown]"
 end
 
@@ -376,6 +398,16 @@ function M.get_display_type(node, bufnr)
   if node_type == "export_declaration" then
     return "export"
   end
+
+  -- Preprocessor conditionals
+  if node_type == "preproc_ifdef" then
+    for child in node:iter_children() do
+      if child:type() == "#ifndef" then return "#ifndef" end
+      if child:type() == "#ifdef" then return "#ifdef" end
+    end
+    return "#ifdef"
+  end
+  if node_type == "preproc_if" then return "#if" end
 
   return node_type
 end
@@ -496,11 +528,19 @@ function M.is_nestable(node)
       end
     end
   end
+  -- Preprocessor conditionals are always nestable
+  if t == "preproc_ifdef" or t == "preproc_if" then
+    return true
+  end
   return false
 end
 
 function M.get_body_node(node)
   local t = node:type()
+  -- Preprocessor conditionals: the node itself is the body
+  if t == "preproc_ifdef" or t == "preproc_if" then
+    return node
+  end
   if t == "class_specifier" or t == "struct_specifier" or t == "union_specifier" then
     for child in node:iter_children() do
       if child:type() == "field_declaration_list" then
@@ -567,6 +607,9 @@ local CHILD_TYPES = {
   using_declaration = true,
   -- Enum members
   enumerator = true,
+  -- Preprocessor conditionals (nestable)
+  preproc_ifdef = true,
+  preproc_if = true,
   -- Namespace children (full declarations)
   preproc_def = true,
   preproc_function_def = true,
@@ -595,6 +638,24 @@ function M.get_access_specifier(node, bufnr)
     -- The colon is a separate sibling node, so text is just "public"/"protected"/"private"
     local spec = text:match("^(%w+)")
     return spec
+  end
+  return nil
+end
+
+--- Get the guard identifier for a #ifndef include guard, so the matching
+--- #define can be filtered from children.
+--- @param node any treesitter node (preproc_ifdef)
+--- @param bufnr number buffer handle
+--- @return string|nil guard_name the identifier if this is a #ifndef, nil otherwise
+function M.get_preproc_guard_name(node, bufnr)
+  if node:type() ~= "preproc_ifdef" then return nil end
+  local is_ifndef = false
+  for child in node:iter_children() do
+    if child:type() == "#ifndef" then
+      is_ifndef = true
+    elseif child:type() == "identifier" and is_ifndef then
+      return vim.treesitter.get_node_text(child, bufnr)
+    end
   end
   return nil
 end

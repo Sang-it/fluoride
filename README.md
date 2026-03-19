@@ -4,7 +4,7 @@ A structural code editor for Neovim. View, reorder, rename, duplicate, delete, a
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/856e78c7-1124-45a4-850a-e6c95e8e2bc0" controls="controls" width="100%"></video>
+<video src="https://github.com/user-attachments/assets/0c556d53-d05f-487a-86eb-3eddcbacd0d6" controls="controls" width="100%"></video>
 
 ## Features
 

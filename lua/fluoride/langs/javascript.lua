@@ -52,6 +52,16 @@ M.highlights = {
   ["do"]               = { prefix = "Keyword",  name = "Identifier" },
 }
 
+local STATEMENT_MAP = {
+  if_statement = "if",
+  while_statement = "while",
+  for_statement = "for",
+  for_in_statement = "for",
+  switch_statement = "switch",
+  try_statement = "try",
+  do_statement = "do",
+}
+
 function M.is_declaration(node)
   return not SKIP_TYPES[node:type()]
 end
@@ -202,16 +212,6 @@ function M.get_display_type(node, bufnr)
   if node_type == "field_definition" then return "field" end
   if node_type == "static_block" then return "static block" end
 
-  -- Statement types
-  local STATEMENT_MAP = {
-    if_statement = "if",
-    while_statement = "while",
-    for_statement = "for",
-    for_in_statement = "for",
-    switch_statement = "switch",
-    try_statement = "try",
-    do_statement = "do",
-  }
   if STATEMENT_MAP[node_type] then
     return STATEMENT_MAP[node_type]
   end

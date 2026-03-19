@@ -264,31 +264,14 @@ function M.get_code_points(bufnr)
     table.insert(all_children, child)
   end
 
-  local comment_types = lang.comment_types or {}
-  local entries = {}
+  -- Process top-level siblings with comment attachment
+  local entries, nodes = process_siblings(all_children, lang, bufnr, function(n)
+    return lang.is_declaration(n)
+  end)
 
-  for i, child in ipairs(all_children) do
-    -- Skip treesitter error nodes (incomplete/broken syntax)
-    if child:type() == "ERROR" then
-      goto continue_top
-    end
-
-    if lang.is_declaration(child) then
-      -- Walk backwards to find leading comments
-      local comment_sr = find_comment_start(all_children, i, comment_types)
-      local decl_sr = select(1, child:range())
-      local sr_override = (comment_sr < decl_sr) and comment_sr or nil
-
-      local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
-      if ok and entry then
-        -- Recursively extract nestable children (e.g., methods in a class/impl, classes in a namespace)
-        extract_children_recursive(entry, child, lang, bufnr)
-
-        table.insert(entries, entry)
-      end
-    end
-
-    ::continue_top::
+  -- Recursively extract nestable children (e.g., methods in a class/impl, classes in a namespace)
+  for i, entry in ipairs(entries) do
+    extract_children_recursive(entry, nodes[i], lang, bufnr)
   end
 
   return entries, lang

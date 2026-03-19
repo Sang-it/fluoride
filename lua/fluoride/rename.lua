@@ -112,79 +112,59 @@ function M.apply_renames(bufnr, renames, on_done)
       return
     end
 
+    -- Build rename callback shared by both branches
+    local prev_win = source_win and vim.api.nvim_get_current_win() or nil
+    local function on_rename_result(err, result, ctx)
+      if err then
+        vim.notify(
+          "Fluoride: LSP rename failed for '" .. old_name .. "': " .. tostring(err.message or err),
+          vim.log.levels.ERROR
+        )
+      elseif result then
+        local client = vim.lsp.get_client_by_id(ctx.client_id)
+        local client_encoding = client and client.offset_encoding or "utf-16"
+        vim.lsp.util.apply_workspace_edit(result, client_encoding)
+        vim.notify(
+          "Fluoride: renamed '" .. old_name .. "' -> '" .. new_name .. "'",
+          vim.log.levels.INFO
+        )
+      end
+
+      vim.schedule(function()
+        if prev_win and vim.api.nvim_win_is_valid(prev_win) then
+          vim.api.nvim_set_current_win(prev_win)
+        end
+        do_rename(idx + 1)
+      end)
+    end
+
+    local lsp_params
     if source_win then
-      -- Position cursor in source window and use vim.lsp.buf.rename()
-      -- This handles encoding, prepareRename, and all protocol details correctly.
-      -- We must set the current window so vim.lsp.buf.rename uses the right context.
-      local prev_win = vim.api.nvim_get_current_win()
+      -- Position cursor in source window for correct LSP context
       vim.api.nvim_set_current_win(source_win)
       vim.api.nvim_win_set_cursor(source_win, { line + 1, col }) -- 1-indexed line, 0-indexed col
 
       -- Build proper LSP params from the cursor position (handles encoding correctly)
       local clients = vim.lsp.get_clients({ bufnr = bufnr })
-      local encoding = "utf-16"
+      local request_encoding = "utf-16"
       for _, client in ipairs(clients) do
         if client.server_capabilities.renameProvider then
-          encoding = client.offset_encoding or "utf-16"
+          request_encoding = client.offset_encoding or "utf-16"
           break
         end
       end
-      local lsp_params = vim.lsp.util.make_position_params(source_win, encoding)
+      lsp_params = vim.lsp.util.make_position_params(source_win, request_encoding)
       lsp_params.newName = new_name
-
-      vim.lsp.buf_request(bufnr, "textDocument/rename", lsp_params, function(err, result, ctx)
-        if err then
-          vim.notify(
-            "Fluoride: LSP rename failed for '" .. old_name .. "': " .. tostring(err.message or err),
-            vim.log.levels.ERROR
-          )
-        elseif result then
-          local client = vim.lsp.get_client_by_id(ctx.client_id)
-          local encoding = client and client.offset_encoding or "utf-16"
-          vim.lsp.util.apply_workspace_edit(result, encoding)
-          vim.notify(
-            "Fluoride: renamed '" .. old_name .. "' -> '" .. new_name .. "'",
-            vim.log.levels.INFO
-          )
-        end
-
-        -- Restore window and continue with next rename
-        vim.schedule(function()
-          if vim.api.nvim_win_is_valid(prev_win) then
-            vim.api.nvim_set_current_win(prev_win)
-          end
-          do_rename(idx + 1)
-        end)
-      end)
     else
       -- No source window: use raw LSP request as fallback
-      local params = {
+      lsp_params = {
         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
         position = { line = line, character = col },
         newName = new_name,
       }
-
-      vim.lsp.buf_request(bufnr, "textDocument/rename", params, function(err, result, ctx)
-        if err then
-          vim.notify(
-            "Fluoride: LSP rename failed for '" .. old_name .. "': " .. tostring(err.message or err),
-            vim.log.levels.ERROR
-          )
-        elseif result then
-          local client = vim.lsp.get_client_by_id(ctx.client_id)
-          local encoding = client and client.offset_encoding or "utf-16"
-          vim.lsp.util.apply_workspace_edit(result, encoding)
-          vim.notify(
-            "Fluoride: renamed '" .. old_name .. "' -> '" .. new_name .. "'",
-            vim.log.levels.INFO
-          )
-        end
-
-        vim.schedule(function()
-          do_rename(idx + 1)
-        end)
-      end)
     end
+
+    vim.lsp.buf_request(bufnr, "textDocument/rename", lsp_params, on_rename_result)
   end
 
   do_rename(1)

@@ -37,6 +37,17 @@ M.highlights = {
   ["repeat"]         = { prefix = "Keyword",  name = "Identifier" },
 }
 
+local STATEMENT_MAP = {
+  if_statement = "if",
+  while_statement = "while",
+  for_statement = "for",
+  for_in_statement = "for",
+  for_numeric_statement = "for",
+  for_generic_statement = "for",
+  do_statement = "do",
+  repeat_statement = "repeat",
+}
+
 function M.is_declaration(node)
   return not SKIP_TYPES[node:type()]
 end
@@ -143,17 +154,6 @@ function M.get_display_type(node, bufnr)
     return "local"
   end
 
-  -- Statement types
-  local STATEMENT_MAP = {
-    if_statement = "if",
-    while_statement = "while",
-    for_statement = "for",
-    for_in_statement = "for",
-    for_numeric_statement = "for",
-    for_generic_statement = "for",
-    do_statement = "do",
-    repeat_statement = "repeat",
-  }
   if STATEMENT_MAP[node_type] then
     return STATEMENT_MAP[node_type]
   end
@@ -230,5 +230,10 @@ function M.get_arity(node, bufnr)
 
   return nil
 end
+
+-- Lua does not have nestable declaration types (no classes/structs with children)
+function M.is_nestable(_node) return false end
+function M.get_body_node(_node) return nil end
+function M.is_child_declaration(_node) return false end
 
 return M

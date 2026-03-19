@@ -373,17 +373,7 @@ function M.get_display_type(node, bufnr)
     return "template"
   end
 
-  -- export_declaration: recurse
   if node_type == "export_declaration" then
-    for child in node:iter_children() do
-      local ct = child:type()
-      if ct ~= "export" then
-        local dt = M.get_display_type(child, bufnr)
-        if dt ~= child:type() then
-          return "export"
-        end
-      end
-    end
     return "export"
   end
 

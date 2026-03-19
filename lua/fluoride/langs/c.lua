@@ -19,8 +19,6 @@ local SKIP_TYPES = {
   preproc_endif = true,
   preproc_call = true,
   preproc_pragma = true,
-  linkage_specification = true,
-  using_declaration = true,
   empty_declaration = true,
   empty_statement = true,
   [";"] = true,
@@ -37,10 +35,6 @@ M.highlights = {
   ["typedef union"]  = { prefix = "Type",     name = "Type" },
   ["variable"]  = { prefix = "Keyword",  name = "Identifier" },
   ["#define"]   = { prefix = "PreProc",  name = "Identifier" },
-  -- C++ additions
-  ["class"]     = { prefix = "Type",     name = "Type" },
-  ["namespace"] = { prefix = "Keyword",  name = "Identifier" },
-  ["template"]  = { prefix = "Keyword",  name = "Function" },
   ["expression"] = { prefix = "Keyword",  name = "Identifier" },
   -- Struct/union/enum children
   ["field"]      = { prefix = "Keyword",  name = "Identifier" },
@@ -136,24 +130,6 @@ function M.get_name(node, bufnr)
     end
   end
 
-  -- C++ class_specifier, namespace_definition, template_declaration
-  if node_type == "class_specifier" or node_type == "namespace_definition" then
-    local name_node = node:field("name")[1]
-    if name_node then
-      return vim.treesitter.get_node_text(name_node, bufnr)
-    end
-  end
-
-  if node_type == "template_declaration" then
-    -- Look inside for the actual declaration
-    for child in node:iter_children() do
-      local ct = child:type()
-      if ct == "function_definition" or ct == "declaration" or ct == "class_specifier" then
-        return M.get_name(child, bufnr)
-      end
-    end
-  end
-
   -- struct/enum/union specifier at top level
   if node_type == "struct_specifier" or node_type == "enum_specifier" or node_type == "union_specifier" then
     local name_node = node:field("name")[1]
@@ -236,24 +212,9 @@ function M.get_display_type(node, bufnr)
   if node_type == "struct_specifier" then return "struct" end
   if node_type == "enum_specifier" then return "enum" end
   if node_type == "union_specifier" then return "union" end
-  if node_type == "class_specifier" then return "class" end
   if node_type == "field_declaration" then return "field" end
   if node_type == "enumerator" then return "enumerator" end
-  if node_type == "namespace_definition" then return "namespace" end
   if node_type == "expression_statement" then return "expression" end
-
-  if node_type == "template_declaration" then
-    for child in node:iter_children() do
-      local ct = child:type()
-      if ct == "function_definition" or ct == "declaration" then
-        return "template"
-      end
-      if ct == "class_specifier" then
-        return "template"
-      end
-    end
-    return "template"
-  end
 
   return node_type
 end
@@ -332,28 +293,16 @@ function M.get_arity(node, _bufnr)
     return 0
   end
 
-  -- template_declaration: recurse
-  if node_type == "template_declaration" then
-    for child in node:iter_children() do
-      if child:type() == "function_definition" then
-        return M.get_arity(child, _bufnr)
-      end
-    end
-  end
-
   return nil
 end
 
--- Nesting support for C/C++ structs, enums, unions, and classes
+-- Nesting support for C structs, enums, and unions
 function M.is_nestable(node)
   local t = node:type()
-  if t == "class_specifier" or t == "struct_specifier" or t == "union_specifier" then
+  if t == "struct_specifier" or t == "union_specifier" then
     return true
   end
   if t == "enum_specifier" then
-    return true
-  end
-  if t == "namespace_definition" then
     return true
   end
   -- Handle bare declarations or typedefs wrapping struct/enum/union (e.g., "enum Foo { ... };", "typedef struct { ... } Name;")
@@ -375,7 +324,7 @@ end
 
 function M.get_body_node(node)
   local t = node:type()
-  if t == "class_specifier" or t == "struct_specifier" or t == "union_specifier" then
+  if t == "struct_specifier" or t == "union_specifier" then
     for child in node:iter_children() do
       if child:type() == "field_declaration_list" then
         return child
@@ -385,13 +334,6 @@ function M.get_body_node(node)
   if t == "enum_specifier" then
     for child in node:iter_children() do
       if child:type() == "enumerator_list" then
-        return child
-      end
-    end
-  end
-  if t == "namespace_definition" then
-    for child in node:iter_children() do
-      if child:type() == "declaration_list" then
         return child
       end
     end
@@ -424,16 +366,12 @@ local C_CHILD_TYPES = {
   declaration = true,
   field_declaration = true,
   enumerator = true,
-  -- C++ namespace/class children (full declarations)
   type_definition = true,
   preproc_def = true,
   preproc_function_def = true,
-  class_specifier = true,
   struct_specifier = true,
   enum_specifier = true,
   union_specifier = true,
-  namespace_definition = true,
-  template_declaration = true,
   expression_statement = true,
 }
 

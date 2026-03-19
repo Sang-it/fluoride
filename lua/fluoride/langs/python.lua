@@ -39,7 +39,14 @@ M.highlights = {
   ["try"]        = { prefix = "Keyword",  name = "Identifier" },
   ["with"]       = { prefix = "Keyword",  name = "Identifier" },
   ["assert"]     = { prefix = "Keyword",  name = "Identifier" },
-  ["property"]   = { prefix = "Keyword",  name = "Identifier" },
+}
+
+local STATEMENT_MAP = {
+  if_statement = "if",
+  while_statement = "while",
+  for_statement = "for",
+  try_statement = "try",
+  with_statement = "with",
 }
 
 function M.is_declaration(node)
@@ -178,14 +185,6 @@ function M.get_display_type(node, bufnr)
     return "assert"
   end
 
-  -- Statement types
-  local STATEMENT_MAP = {
-    if_statement = "if",
-    while_statement = "while",
-    for_statement = "for",
-    try_statement = "try",
-    with_statement = "with",
-  }
   if STATEMENT_MAP[node_type] then
     return STATEMENT_MAP[node_type]
   end

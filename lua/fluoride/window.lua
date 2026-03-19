@@ -240,7 +240,6 @@ end
 
 -- Track the current Fluoride window
 local active_win = nil
-local active_buf = nil
 
 --- Open the Fluoride floating window.
 --- @param source_bufnr number the source buffer to operate on
@@ -347,6 +346,15 @@ function M.open(source_bufnr, entries, lang, config)
     end,
   })
 
+  -- Helper: find the 0-indexed column of a symbol name on a buffer line
+  local function find_symbol_col(name, row)
+    if not name or #name == 0 then return 0 end
+    local line = vim.api.nvim_buf_get_lines(source_bufnr, row, row + 1, false)[1] or ""
+    local pattern = "%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]"
+    local found = line:find(pattern)
+    return found and (found - 1) or 0
+  end
+
   -- Helper: find the source window
   local function find_source_win()
     for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -364,154 +372,146 @@ function M.open(source_bufnr, entries, lang, config)
     end
   end
 
-  -- Register keymaps (skip if set to false)
-  local function map(key, fn, desc)
-    if key ~= false then
-      vim.keymap.set("n", key, fn, { buffer = buf, noremap = true, silent = true, desc = desc })
+  -- Peek/flash namespace (shared by peek and yank keymaps)
+  local peek_ns = vim.api.nvim_create_namespace("fluoride_peek")
+
+  -- Flash an entry range in the source window, clearing after peek_duration ms
+  local function flash_entry_range(entry)
+    vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
+    for row = entry.start_row, entry.end_row do
+      pcall(vim.api.nvim_buf_add_highlight, source_bufnr, peek_ns, "Visual", row, 0, -1)
     end
+    vim.defer_fn(function()
+      if vim.api.nvim_buf_is_valid(source_bufnr) then
+        vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
+      end
+    end, peek_duration)
   end
 
-  -- Close
-  map(km.close or "q", close, "Close Fluoride window")
-  map(km.close_alt or "<C-c>", close, "Close Fluoride window")
+  -- Register all keymaps for the Fluoride buffer
+  local function setup_keymaps()
+    local function map(key, fn, desc)
+      if key ~= false then
+        vim.keymap.set("n", key, fn, { buffer = buf, noremap = true, silent = true, desc = desc })
+      end
+    end
 
-  -- Jump to code point
-  map(km.jump or "<CR>", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-    local map_entry = flat_map[cursor_line]
-    if not map_entry or not map_entry.entry then return end
+    -- Close
+    map(km.close or "q", close, "Close Fluoride window")
+    map(km.close_alt or "<C-c>", close, "Close Fluoride window")
 
-    local source_win = find_source_win()
-    if source_win then
-      local target_row = map_entry.entry.decl_start_row + 1
-      vim.api.nvim_set_current_win(source_win)
+    -- Jump to code point
+    map(km.jump or "<CR>", function()
+      local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+      local map_entry = flat_map[cursor_line]
+      if not map_entry or not map_entry.entry then return end
 
-      -- Find the column of the symbol name on the declaration line
-      local name = map_entry.entry.name
-      local decl_line = vim.api.nvim_buf_get_lines(source_bufnr, target_row - 1, target_row, false)[1] or ""
-      local col = 0
-      if name and #name > 0 then
-        local pattern = "%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]"
-        local found = decl_line:find(pattern)
-        if found then
-          col = found - 1
+      local source_win = find_source_win()
+      if source_win then
+        local target_row = map_entry.entry.decl_start_row + 1
+        vim.api.nvim_set_current_win(source_win)
+        local col = find_symbol_col(map_entry.entry.name, target_row - 1)
+        vim.api.nvim_win_set_cursor(source_win, { target_row, col })
+        vim.fn.winrestview({ topline = target_row })
+      end
+    end, "Jump to code point")
+
+    -- Peek at code point
+    map(km.peek or "gd", function()
+      local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+      local map_entry = flat_map[cursor_line]
+      if not map_entry or not map_entry.entry then return end
+
+      local source_win = find_source_win()
+      if source_win then
+        local target_row = map_entry.entry.start_row + 1
+        vim.api.nvim_win_call(source_win, function()
+          vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
+          vim.cmd("normal! zz")
+        end)
+        flash_entry_range(map_entry.entry)
+      end
+    end, "Peek at code point")
+
+    -- LSP hover
+    map(km.hover or "K", function()
+      local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+      local map_entry = flat_map[cursor_line]
+      if not map_entry or not map_entry.entry then return end
+
+      local source_win = find_source_win()
+      if source_win then
+        local target_row = map_entry.entry.decl_start_row + 1
+        vim.api.nvim_set_current_win(source_win)
+        local col = find_symbol_col(map_entry.entry.name, target_row - 1)
+        vim.api.nvim_win_set_cursor(source_win, { target_row, col })
+        vim.lsp.buf.hover()
+      end
+    end, "LSP hover for code point")
+
+    -- Cycle child declarations depth visibility
+    map(km.toggle_children or "<Tab>", function()
+      if current_depth >= configured_max_depth then
+        current_depth = 0
+      else
+        current_depth = current_depth + 1
+      end
+      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
+      flat_map = new_flat_map
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+      vim.api.nvim_set_option_value("modified", false, { buf = buf })
+      apply_highlights(buf, highlights, sorted_prefixes)
+      update_footer()
+    end, "Cycle child declarations depth")
+
+    -- Peek + copy code block
+    local yank_comments = config and config.yank_comments ~= false
+    map(km.yank or "gy", function()
+      local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+      local map_entry = flat_map[cursor_line]
+      if not map_entry or not map_entry.entry then return end
+
+      local source_win = find_source_win()
+      if source_win then
+        local target_row = map_entry.entry.start_row + 1
+
+        -- Center + flash (same as gd)
+        vim.api.nvim_win_call(source_win, function()
+          vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
+          vim.cmd("normal! zz")
+        end)
+        flash_entry_range(map_entry.entry)
+
+        -- Copy the code block
+        local copy_start = map_entry.entry.start_row
+        if not yank_comments then
+          copy_start = map_entry.entry.decl_start_row
         end
+        local lines = vim.api.nvim_buf_get_lines(source_bufnr, copy_start, map_entry.entry.end_row + 1, false)
+        local text = table.concat(lines, "\n")
+        vim.fn.setreg('"', text, "l")
+        vim.fn.setreg("+", text, "l")
+        vim.notify("Fluoride: copied " .. #lines .. " lines", vim.log.levels.INFO)
       end
+    end, "Peek and copy code block")
+  end
 
-      vim.api.nvim_win_set_cursor(source_win, { target_row, col })
-      vim.fn.winrestview({ topline = target_row })
+  setup_keymaps()
+
+  -- Refresh the Fluoride display from the source buffer
+  local function refresh_display()
+    local treesitter = require("fluoride.treesitter")
+    local new_entries, _ = treesitter.get_code_points(source_bufnr)
+    if #new_entries > 0 then
+      entries = new_entries
+      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
+      flat_map = new_flat_map
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+      vim.api.nvim_set_option_value("modified", false, { buf = buf })
+      apply_highlights(buf, highlights, sorted_prefixes)
+      update_footer()
     end
-  end, "Jump to code point")
-
-  -- Peek at code point
-  local peek_ns = vim.api.nvim_create_namespace("fluoride_peek")
-  map(km.peek or "gd", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-    local map_entry = flat_map[cursor_line]
-    if not map_entry or not map_entry.entry then return end
-
-    local source_win = find_source_win()
-    if source_win then
-      local target_row = map_entry.entry.start_row + 1
-      vim.api.nvim_win_call(source_win, function()
-        vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
-        vim.cmd("normal! zz")
-      end)
-
-      vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
-      for row = map_entry.entry.start_row, map_entry.entry.end_row do
-        vim.api.nvim_buf_add_highlight(source_bufnr, peek_ns, "Visual", row, 0, -1)
-      end
-
-      vim.defer_fn(function()
-        if vim.api.nvim_buf_is_valid(source_bufnr) then
-          vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
-        end
-      end, peek_duration)
-    end
-  end, "Peek at code point")
-
-  -- LSP hover
-  map(km.hover or "K", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-    local map_entry = flat_map[cursor_line]
-    if not map_entry or not map_entry.entry then return end
-
-    local source_win = find_source_win()
-    if source_win then
-      local target_row = map_entry.entry.decl_start_row + 1
-      vim.api.nvim_set_current_win(source_win)
-
-      local name = map_entry.entry.name
-      local decl_line = vim.api.nvim_buf_get_lines(source_bufnr, target_row - 1, target_row, false)[1] or ""
-      local col = 0
-      if name and #name > 0 then
-        local pattern = "%f[%w_]" .. vim.pesc(name) .. "%f[^%w_]"
-        local found = decl_line:find(pattern)
-        if found then
-          col = found - 1
-        end
-      end
-
-      vim.api.nvim_win_set_cursor(source_win, { target_row, col })
-      vim.lsp.buf.hover()
-    end
-  end, "LSP hover for code point")
-
-  -- Cycle child declarations depth visibility
-  map(km.toggle_children or "<Tab>", function()
-    if current_depth >= configured_max_depth then
-      current_depth = 0
-    else
-      current_depth = current_depth + 1
-    end
-    local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
-    flat_map = new_flat_map
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
-    vim.api.nvim_set_option_value("modified", false, { buf = buf })
-    apply_highlights(buf, highlights, sorted_prefixes)
-    update_footer()
-  end, "Cycle child declarations depth")
-
-  -- Peek + copy code block
-  local yank_comments = config and config.yank_comments ~= false
-  map(km.yank or "gy", function()
-    local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
-    local map_entry = flat_map[cursor_line]
-    if not map_entry or not map_entry.entry then return end
-
-    local source_win = find_source_win()
-    if source_win then
-      local target_row = map_entry.entry.start_row + 1
-
-      -- Center + flash (same as gd)
-      vim.api.nvim_win_call(source_win, function()
-        vim.api.nvim_win_set_cursor(source_win, { target_row, 0 })
-        vim.cmd("normal! zz")
-      end)
-
-      vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
-      for row = map_entry.entry.start_row, map_entry.entry.end_row do
-        pcall(vim.api.nvim_buf_add_highlight, source_bufnr, peek_ns, "Visual", row, 0, -1)
-      end
-      vim.defer_fn(function()
-        if vim.api.nvim_buf_is_valid(source_bufnr) then
-          vim.api.nvim_buf_clear_namespace(source_bufnr, peek_ns, 0, -1)
-        end
-      end, peek_duration)
-
-      -- Copy the code block
-      local copy_start = map_entry.entry.start_row
-      if not yank_comments then
-        copy_start = map_entry.entry.decl_start_row
-      end
-      local lines = vim.api.nvim_buf_get_lines(source_bufnr, copy_start, map_entry.entry.end_row + 1, false)
-      local text = table.concat(lines, "\n")
-      vim.fn.setreg('"', text, "l")
-      vim.fn.setreg("+", text, "l")
-      vim.notify("Fluoride: copied " .. #lines .. " lines", vim.log.levels.INFO)
-    end
-  end, "Peek and copy code block")
+  end
 
   -- Handle :w — intercept the save and apply reordering + renames
   vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -574,15 +574,7 @@ function M.open(source_bufnr, entries, lang, config)
 
         -- Format via LSP if available (without closing the window)
         local function format_source()
-          -- Find the source window to run format in its context
-          local source_win = nil
-          for _, w in ipairs(vim.api.nvim_list_wins()) do
-            if w ~= win and vim.api.nvim_win_get_buf(w) == source_bufnr then
-              source_win = w
-              break
-            end
-          end
-
+          local source_win = find_source_win()
           if source_win then
             vim.api.nvim_win_call(source_win, function()
               local clients = vim.lsp.get_clients({ bufnr = source_bufnr })
@@ -684,21 +676,7 @@ function M.open(source_bufnr, entries, lang, config)
         -- Refresh the Fluoride list after changes are applied
         local function refresh(affected)
           format_source()
-
-          -- Re-extract declarations from the updated source buffer
-          local treesitter = require("fluoride.treesitter")
-          local new_entries, _ = treesitter.get_code_points(source_bufnr)
-          if #new_entries > 0 then
-            entries = new_entries
-            local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
-            flat_map = new_flat_map
-            vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
-            vim.api.nvim_set_option_value("modified", false, { buf = buf })
-            apply_highlights(buf, highlights, sorted_prefixes)
-            update_footer()
-          end
-
-          -- Flash affected entries after refresh
+          refresh_display()
           flash_affected(affected)
         end
 
@@ -735,9 +713,8 @@ function M.open(source_bufnr, entries, lang, config)
     end,
   })
 
-  -- Track the active window/buffer
+  -- Track the active window
   active_win = win
-  active_buf = buf
 
   -- Reposition window when terminal is resized.
   -- Sidebar mode: keep the initial pixel dimensions, only reposition.
@@ -790,19 +767,7 @@ function M.open(source_bufnr, entries, lang, config)
       if not vim.api.nvim_win_is_valid(win) then return end
       if not vim.api.nvim_buf_is_valid(buf) then return end
 
-      local ok, _ = pcall(function()
-        local treesitter = require("fluoride.treesitter")
-        local new_entries, _ = treesitter.get_code_points(source_bufnr)
-        if #new_entries > 0 then
-          entries = new_entries
-           local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
-           flat_map = new_flat_map
-           vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
-           vim.api.nvim_set_option_value("modified", false, { buf = buf })
-           apply_highlights(buf, highlights, sorted_prefixes)
-          update_footer()
-        end
-      end)
+      pcall(refresh_display)
     end,
   })
 
@@ -812,7 +777,6 @@ function M.open(source_bufnr, entries, lang, config)
     once = true,
     callback = function()
       active_win = nil
-      active_buf = nil
       pcall(vim.api.nvim_del_augroup_by_id, resize_group)
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })

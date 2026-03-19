@@ -40,6 +40,57 @@ local function translate_comment(line, lang_prefix)
   return line
 end
 
+--- Append an entry's lines to a result list, inserting new comments between
+--- existing comments and the declaration.
+--- @param result string[] accumulator for output lines
+--- @param entry_lines string[] the entry's source lines
+--- @param comment_line_count number number of existing comment lines before declaration
+--- @param new_comments string[]|nil new comment lines to insert (starting with //)
+--- @param lang_prefix string the language's native comment prefix
+local function insert_lines_with_comments(result, entry_lines, comment_line_count, new_comments, lang_prefix)
+  local has_comments = new_comments and #new_comments > 0
+
+  if has_comments and comment_line_count > 0 then
+    -- Existing comments first, then new comments, then declaration
+    for j = 1, comment_line_count do
+      table.insert(result, entry_lines[j])
+    end
+    local indent = entry_lines[comment_line_count + 1]:match("^(%s*)")
+    for _, comment_line in ipairs(new_comments) do
+      table.insert(result, indent .. translate_comment(comment_line, lang_prefix))
+    end
+    for j = comment_line_count + 1, #entry_lines do
+      table.insert(result, entry_lines[j])
+    end
+  elseif has_comments then
+    -- No existing comments — insert new comments with proper indentation, then entry
+    local indent = entry_lines[1]:match("^(%s*)")
+    for _, comment_line in ipairs(new_comments) do
+      table.insert(result, indent .. translate_comment(comment_line, lang_prefix))
+    end
+    for _, line in ipairs(entry_lines) do
+      table.insert(result, line)
+    end
+  else
+    -- No new comments — just add entry as-is
+    for _, line in ipairs(entry_lines) do
+      table.insert(result, line)
+    end
+  end
+end
+
+--- Extract the last segment of a dotted/colon name for symbol search.
+--- e.g., "Animal.Speak" → "Speak", "M:initialize" → "initialize", "foo" → "foo"
+--- @param name string
+--- @return string last_segment
+local function get_search_name(name)
+  local sep_pos = name:find("[%.:]([^%.:]*)$")
+  if sep_pos then
+    return name:sub(sep_pos + 1)
+  end
+  return name
+end
+
 --- Generate the next available suffixed name (e.g., greet_1, greet_2).
 --- @param base_name string the original name
 --- @param existing_names table<string, boolean> set of names already in use
@@ -327,13 +378,9 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
   if has_access_specifiers then
     -- Find the first access specifier line in the parent's lines to get indentation
     for _, line in ipairs(parent.lines) do
-      local indent, spec = line:match("^(%s*)(public|protected|private)")
-      if not indent then
-        -- Lua doesn't have alternation; check each keyword
-        indent = line:match("^(%s*)public%s*:?%s*$")
-          or line:match("^(%s*)protected%s*:?%s*$")
-          or line:match("^(%s*)private%s*:?%s*$")
-      end
+      local indent = line:match("^(%s*)public%s*:?%s*$")
+        or line:match("^(%s*)protected%s*:?%s*$")
+        or line:match("^(%s*)private%s*:?%s*$")
       if indent then
         access_indent = indent
         break
@@ -358,49 +405,17 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     -- Track where this child's lines start in the result (0-indexed offset)
     local child_start = #result
 
-    -- Insert new comments above the child (between existing comments and declaration)
+    -- Insert child lines with any new comments
     local child_group = child_groups and child_groups[i]
-    local has_child_comments = child_group and child_group.new_comments and #child_group.new_comments > 0
+    local child_new_comments = child_group and child_group.new_comments or nil
     local child_comment_count = child.decl_start_row - child.start_row
+    insert_lines_with_comments(result, child.lines, child_comment_count, child_new_comments, lang_prefix or "//")
 
-    if has_child_comments and child_comment_count > 0 then
-      -- Existing comments first, then new comments, then declaration
-      for j = 1, child_comment_count do
-        table.insert(result, child.lines[j])
-      end
-      -- Detect indentation from first declaration line
-      local indent = child.lines[child_comment_count + 1]:match("^(%s*)")
-      for _, comment_line in ipairs(child_group.new_comments) do
-        table.insert(result, indent .. translate_comment(comment_line, lang_prefix or "//"))
-      end
-      for j = child_comment_count + 1, #child.lines do
-        table.insert(result, child.lines[j])
-      end
-    elseif has_child_comments then
-      -- No existing comments — insert new comments with proper indentation, then child
-      local indent = child.lines[1]:match("^(%s*)")
-      for _, comment_line in ipairs(child_group.new_comments) do
-        table.insert(result, indent .. translate_comment(comment_line, lang_prefix or "//"))
-      end
-      for _, line in ipairs(child.lines) do
-        table.insert(result, line)
-      end
-    else
-      -- No new comments — just add child as-is
-      for _, line in ipairs(child.lines) do
-        table.insert(result, line)
-      end
-    end
-
-    -- Record this child's declaration position within the reconstructed lines.
-    -- The declaration line is at a fixed offset within the child's lines,
-    -- but new comments may have been inserted before it, shifting the position.
-    -- We compute decl_offset as: current result length - child's remaining lines after decl.
-    local child_comment_lines = child.decl_start_row - child.start_row
-    local new_comment_count = (has_child_comments and child_group and child_group.new_comments) and #child_group.new_comments or 0
+    -- Record this child's declaration position within the reconstructed lines
+    local new_comment_count = (child_new_comments and #child_new_comments > 0) and #child_new_comments or 0
     child_offsets[i] = {
       start_offset = child_start,
-      decl_offset = child_start + child_comment_lines + new_comment_count,
+      decl_offset = child_start + child_comment_count + new_comment_count,
     }
 
     -- Add the trailing gap from the original child (skip for last child)
@@ -439,6 +454,292 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
   end
 
   return result, child_offsets
+end
+
+--- Display types that should not be renamed (expressions, call signatures, etc.)
+local CHILD_NON_RENAMEABLE = {
+  ["expression"] = true, ["call"] = true, ["index"] = true,
+  ["static block"] = true, ["static_assert"] = true,
+}
+
+--- Top-level display types that should not be renamed (control flow, expressions).
+--- Their display names are descriptive text, not symbol identifiers.
+local NON_RENAMEABLE = {
+  ["if"] = true, ["while"] = true, ["for"] = true, ["switch"] = true,
+  ["try"] = true, ["do"] = true, ["with"] = true, ["select"] = true,
+  ["assert"] = true, ["expression"] = true, ["call"] = true,
+  ["go"] = true, ["defer"] = true, ["repeat"] = true,
+}
+
+--- Recursive function to process children at any depth.
+--- Modifies entry_copy.lines via reconstruct_parent when children changed.
+--- @param entry_copy table working copy of the entry
+--- @param orig_entry table the original entry
+--- @param group table parsed group from display lines
+--- @param state table mutable state: { renames, allow_deletions, lang, changes_made }
+--- @return table|nil error table { ok, err, renames, deletions, affected } on failure, nil on success
+local function process_children_recursive(entry_copy, orig_entry, group, state)
+  if not orig_entry.children or #orig_entry.children == 0 then
+    return nil
+  end
+  if not group.children or #group.children == 0 then
+    -- No children in parsed group. This could mean:
+    -- 1. Children were hidden by max_depth (display never showed them) -> skip, leave unchanged
+    -- 2. User actually deleted all children -> treat as deletion
+    -- We can't distinguish these here, so we skip processing entirely.
+    -- Users must have children visible (via Tab/max_depth) to delete them.
+    return nil
+  end
+
+  local orig_children = orig_entry.children
+
+  -- Match children
+  local child_matched = match_entries(group.children, orig_children)
+
+  -- Detect child deletions
+  if #group.children < #orig_children then
+    local matched_child_originals = {}
+    for _, orig_idx in pairs(child_matched) do
+      matched_child_originals[orig_idx] = true
+    end
+
+    local child_deletions = {}
+    for cj, child in ipairs(orig_children) do
+      if not matched_child_originals[cj] then
+        table.insert(child_deletions, {
+          name = child.name,
+          display_type = child.display_type,
+          parent_name = orig_entry.name,
+        })
+      end
+    end
+
+    if #child_deletions > 0 and not state.allow_deletions then
+      return { ok = false, err = nil, renames = {}, deletions = child_deletions, affected = nil }
+    end
+
+    -- If deletions allowed, filter out deleted children and re-match
+    if state.allow_deletions and #child_deletions > 0 then
+      local filtered_children = {}
+      for cj, child in ipairs(orig_children) do
+        if matched_child_originals[cj] then
+          table.insert(filtered_children, child)
+        end
+      end
+      orig_children = filtered_children
+      child_matched = match_entries(group.children, orig_children)
+    end
+  end
+
+  -- Build ordered children, detect renames, and handle duplicates
+  local ordered_children = {}
+  local child_existing_names = {}
+  for _, c in ipairs(orig_children) do
+    child_existing_names[c.name] = true
+  end
+
+  local has_child_duplicates = false
+  for j = 1, #group.children do
+    if child_matched[j] then
+      -- Matched to an original child
+      local orig_child = orig_children[child_matched[j]]
+      -- Copy so we can modify lines without affecting the original
+      local child_copy = {
+        name = orig_child.name,
+        display_type = orig_child.display_type,
+        arity = orig_child.arity,
+        start_row = orig_child.start_row,
+        decl_start_row = orig_child.decl_start_row,
+        end_row = orig_child.end_row,
+        lines = orig_child.lines, -- will be replaced by reconstruct_parent if sub-children changed
+        children = orig_child.children,
+        access = orig_child.access,
+      }
+
+      -- Update access if the user moved the child to a different access section
+      if group.children[j].access then
+        if child_copy.access ~= group.children[j].access then
+          child_copy.access = group.children[j].access
+          state.changes_made = true
+        end
+      end
+
+      -- Recurse FIRST: process this child's own children (bottom-up)
+      -- This may replace child_copy.lines with reconstructed content.
+      if orig_child.children and #orig_child.children > 0 then
+        local sub_result = process_children_recursive(child_copy, orig_child, group.children[j], state)
+        if sub_result then
+          return sub_result
+        end
+      end
+
+      -- Detect rename AFTER recursion so child_copy has final lines
+      if group.children[j].name ~= orig_child.name and not CHILD_NON_RENAMEABLE[orig_child.display_type] then
+        local rename_entry = { old_name = orig_child.name, new_name = group.children[j].name, child_index = j }
+        table.insert(state.renames, rename_entry)
+        child_existing_names[group.children[j].name] = true
+        -- Position (rename_line/rename_col) will be set after reconstruct_parent
+      end
+
+      table.insert(ordered_children, child_copy)
+    else
+      -- Unmatched — this is a duplicate child
+      has_child_duplicates = true
+      state.changes_made = true
+
+      -- Find template: look at the child directly above with the same prefix
+      local template_child = nil
+      for k = j - 1, 1, -1 do
+        if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
+          template_child = orig_children[child_matched[k]]
+          break
+        end
+      end
+      if not template_child then
+        for k = j + 1, #group.children do
+          if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
+            template_child = orig_children[child_matched[k]]
+            break
+          end
+        end
+      end
+      if not template_child then
+        for _, c in ipairs(orig_children) do
+          if c.display_type == group.children[j].prefix then
+            template_child = c
+            break
+          end
+        end
+      end
+
+      if template_child then
+        local new_child_name = next_suffix_name(template_child.name, child_existing_names)
+        child_existing_names[new_child_name] = true
+
+        local new_child_lines = rename_in_lines(template_child.lines, template_child.name, new_child_name)
+        table.insert(ordered_children, {
+          name = new_child_name,
+          display_type = template_child.display_type,
+          arity = template_child.arity,
+          start_row = template_child.start_row,
+          decl_start_row = template_child.decl_start_row,
+          end_row = template_child.end_row,
+          lines = new_child_lines,
+          access = template_child.access,
+        })
+      end
+    end
+  end
+
+  -- Check if any child has new comments
+  local has_child_new_comments = false
+  for _, child_group in ipairs(group.children) do
+    if child_group.new_comments and #child_group.new_comments > 0 then
+      has_child_new_comments = true
+      state.changes_made = true
+      break
+    end
+  end
+
+  -- Reconstruct if children were reordered, duplicated, deleted, or have new comments
+  local has_child_deletions = #orig_children ~= #(orig_entry.children or {})
+  if has_child_deletions then
+    state.changes_made = true
+  end
+  if children_order_changed(child_matched, #orig_children) then
+    state.changes_made = true
+  end
+
+  -- Check if any sub-child was reconstructed (lines differ from original)
+  local sub_children_changed = false
+  for j, oc in ipairs(ordered_children) do
+    if child_matched[j] then
+      local orig_child = orig_children[child_matched[j]]
+      if oc.lines ~= orig_child.lines then
+        sub_children_changed = true
+        break
+      end
+    end
+  end
+
+  -- Check if any child's access specifier changed
+  local access_changed = false
+  for j, oc in ipairs(ordered_children) do
+    if child_matched[j] then
+      local orig_child = orig_children[child_matched[j]]
+      if oc.access ~= orig_child.access then
+        access_changed = true
+        state.changes_made = true
+        break
+      end
+    end
+  end
+
+  local did_reconstruct = has_child_duplicates or has_child_deletions or children_order_changed(child_matched, #orig_children) or has_child_new_comments or sub_children_changed or access_changed
+  local child_offsets = nil
+  if did_reconstruct then
+    local lp = state.lang.comment_prefix or "//"
+    entry_copy.lines, child_offsets = reconstruct_parent(orig_entry, ordered_children, child_matched, group.children, lp, orig_children)
+  end
+
+  -- Annotate renames with positions from child_offsets.
+  -- For renames created at this level, compute their declaration row as
+  -- an offset within entry_copy.lines. Tag with the entry_copy reference
+  -- so the caller can resolve to absolute position.
+  for _, r in ipairs(state.renames) do
+    if r.child_index and not r.rename_line then
+      local decl_line_text
+      local decl_row_in_parent
+
+      if child_offsets and child_offsets[r.child_index] then
+        decl_row_in_parent = child_offsets[r.child_index].decl_offset
+        decl_line_text = entry_copy.lines[decl_row_in_parent + 1]
+      else
+        local child = ordered_children[r.child_index]
+        if child then
+          decl_row_in_parent = child.decl_start_row - entry_copy.start_row
+          decl_line_text = entry_copy.lines[decl_row_in_parent + 1]
+        end
+      end
+
+      if decl_line_text and decl_row_in_parent then
+        -- For dotted/colon names (e.g., Animal.Speak, M.greet), search for the last segment
+        local search_name = get_search_name(r.old_name)
+        local pattern = "%f[%w_]" .. vim.pesc(search_name) .. "%f[^%w_]"
+        local col = decl_line_text:find(pattern)
+        if col then
+          r.rename_line = decl_row_in_parent
+          r.rename_col = col - 1
+          r.owner_entry = entry_copy
+        end
+      end
+      r.child_index = nil
+    end
+  end
+
+  -- Adjust sub-child renames: any rename whose owner_entry is one of the
+  -- ordered_children needs its offset adjusted to be relative to entry_copy.lines.
+  for _, r in ipairs(state.renames) do
+    if r.owner_entry and r.rename_line then
+      for ci, oc in ipairs(ordered_children) do
+        if r.owner_entry == oc then
+          local child_start_in_parent
+          if child_offsets and child_offsets[ci] then
+            -- Reconstruction happened: use tracked offset
+            child_start_in_parent = child_offsets[ci].start_offset
+          else
+            -- No reconstruction: compute from original positions
+            child_start_in_parent = oc.start_row - entry_copy.start_row
+          end
+          r.rename_line = child_start_in_parent + r.rename_line
+          r.owner_entry = entry_copy
+          break
+        end
+      end
+    end
+  end
+
+  return nil
 end
 
 --- Apply reordering (with nested children support) and detect renames.
@@ -543,16 +844,16 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
 
   -- Build original child count per parent for validation
   local orig_child_counts = {} -- parent_key → count
-  local function build_child_counts(entry_list, pkey)
+  local function build_child_counts(entry_list)
     for _, entry in ipairs(entry_list) do
-      local key = entry.display_type .. " " .. entry.name
       if entry.children then
+        local key = entry.display_type .. " " .. entry.name
         orig_child_counts[key] = #entry.children
-        build_child_counts(entry.children, key)
+        build_child_counts(entry.children)
       end
     end
   end
-  build_child_counts(original_entries, nil)
+  build_child_counts(original_entries)
 
   local function validate_parents(group_list, parent_key)
     for _, group in ipairs(group_list) do
@@ -625,19 +926,6 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   end
   index_groups(parsed_groups)
 
-  -- Build original child count per parent for re-attribution validation
-  local original_child_count = {} -- parent_key → number of original children
-  local function count_original_children(entry_list)
-    for _, entry in ipairs(entry_list) do
-      if entry.children then
-        local parent_key = entry.display_type .. " " .. entry.name
-        original_child_count[parent_key] = #entry.children
-        count_original_children(entry.children)
-      end
-    end
-  end
-  count_original_children(original_entries)
-
   -- Re-attribute misplaced children (recursive).
   -- Only re-attribute when the current parent has MORE children than expected
   -- AND the target parent has FEWER (indicating positional mis-grouping).
@@ -647,7 +935,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     for i = #group_list, 1, -1 do
       local group = group_list[i]
       local group_key = (group.prefix or "") .. " " .. group.name
-      local expected_count = original_child_count[group_key] or 0
+      local expected_count = orig_child_counts[group_key] or 0
 
       -- Only attempt re-attribution if this parent has more children than expected
       if #group.children > expected_count then
@@ -662,7 +950,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
             -- Only re-attribute if the target parent has fewer children than expected
             local target_group = all_groups_by_key[orig_parent_key]
             local target_count = target_group and #target_group.children or 0
-            local target_expected = original_child_count[orig_parent_key] or 0
+            local target_expected = orig_child_counts[orig_parent_key] or 0
             if target_count < target_expected then
               table.insert(misplaced, child)
             else
@@ -699,7 +987,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   -- Keep the full original list for preamble/postamble/gap calculations
   local all_original_entries = original_entries
 
-  local parent_matched, err = match_entries(parent_parsed, original_entries)
+  local parent_matched = match_entries(parent_parsed, original_entries)
 
   -- Detect deletions: original entries that no parsed group matched
   if #parsed_groups < #original_entries then
@@ -729,9 +1017,10 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         end
       end
       original_entries = filtered_originals
+      changes_made = true
 
       -- Re-run matching with the filtered originals
-      parent_matched, err = match_entries(parent_parsed, original_entries)
+      parent_matched = match_entries(parent_parsed, original_entries)
     end
   end
 
@@ -752,281 +1041,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     end
   end
 
-  -- Recursive function to process children at any depth.
-  -- Modifies entry_copy.lines via reconstruct_parent when children changed.
-  -- Returns nil on success, or an error table { ok, err, renames, deletions, affected } on failure.
-  local function process_children_recursive(entry_copy, orig_entry, group)
-    if not orig_entry.children or #orig_entry.children == 0 then
-      return nil
-    end
-    if not group.children or #group.children == 0 then
-      -- No children in parsed group. This could mean:
-      -- 1. Children were hidden by max_depth (display never showed them) → skip, leave unchanged
-      -- 2. User actually deleted all children → treat as deletion
-      -- We can't distinguish these here, so we skip processing entirely.
-      -- Users must have children visible (via Tab/max_depth) to delete them.
-      return nil
-    end
-
-    local orig_children = orig_entry.children
-
-    -- Match children
-    local child_matched, _ = match_entries(group.children, orig_children)
-
-    -- Detect child deletions
-    if #group.children < #orig_children then
-      local matched_child_originals = {}
-      for _, orig_idx in pairs(child_matched) do
-        matched_child_originals[orig_idx] = true
-      end
-
-      local child_deletions = {}
-      for cj, child in ipairs(orig_children) do
-        if not matched_child_originals[cj] then
-          table.insert(child_deletions, {
-            name = child.name,
-            display_type = child.display_type,
-            parent_name = orig_entry.name,
-          })
-        end
-      end
-
-      if #child_deletions > 0 and not allow_deletions then
-        return { ok = false, err = nil, renames = {}, deletions = child_deletions, affected = nil }
-      end
-
-      -- If deletions allowed, filter out deleted children and re-match
-      if allow_deletions and #child_deletions > 0 then
-        local filtered_children = {}
-        for cj, child in ipairs(orig_children) do
-          if matched_child_originals[cj] then
-            table.insert(filtered_children, child)
-          end
-        end
-        orig_children = filtered_children
-        child_matched, _ = match_entries(group.children, orig_children)
-      end
-    end
-
-    -- Build ordered children, detect renames, and handle duplicates
-    local ordered_children = {}
-    local child_existing_names = {}
-    for _, c in ipairs(orig_children) do
-      child_existing_names[c.name] = true
-    end
-
-    local has_child_duplicates = false
-    for j = 1, #group.children do
-      if child_matched[j] then
-        -- Matched to an original child
-        local orig_child = orig_children[child_matched[j]]
-        -- Copy so we can modify lines without affecting the original
-        local child_copy = {
-          name = orig_child.name,
-          display_type = orig_child.display_type,
-          arity = orig_child.arity,
-          start_row = orig_child.start_row,
-          decl_start_row = orig_child.decl_start_row,
-          end_row = orig_child.end_row,
-          lines = orig_child.lines, -- will be replaced by reconstruct_parent if sub-children changed
-          children = orig_child.children,
-          access = orig_child.access,
-        }
-
-        -- Update access if the user moved the child to a different access section
-        if group.children[j].access then
-          if child_copy.access ~= group.children[j].access then
-            child_copy.access = group.children[j].access
-            changes_made = true
-          end
-        end
-
-        -- Recurse FIRST: process this child's own children (bottom-up)
-        -- This may replace child_copy.lines with reconstructed content.
-        if orig_child.children and #orig_child.children > 0 then
-          local sub_result = process_children_recursive(child_copy, orig_child, group.children[j])
-          if sub_result then
-            return sub_result
-          end
-        end
-
-        -- Detect rename AFTER recursion so child_copy has final lines.
-        -- Skip renames for non-renameable types (expressions, call signatures, etc.)
-        local CHILD_NON_RENAMEABLE = {
-          ["expression"] = true, ["call"] = true, ["index"] = true,
-          ["static block"] = true, ["static_assert"] = true,
-        }
-        if group.children[j].name ~= orig_child.name and not CHILD_NON_RENAMEABLE[orig_child.display_type] then
-          local rename_entry = { old_name = orig_child.name, new_name = group.children[j].name, child_index = j }
-          table.insert(renames, rename_entry)
-          child_existing_names[group.children[j].name] = true
-          -- Position (rename_line/rename_col) will be set after reconstruct_parent
-        end
-
-        table.insert(ordered_children, child_copy)
-      else
-        -- Unmatched — this is a duplicate child
-        has_child_duplicates = true
-        changes_made = true
-
-        -- Find template: look at the child directly above with the same prefix
-        local template_child = nil
-        for k = j - 1, 1, -1 do
-          if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
-            template_child = orig_children[child_matched[k]]
-            break
-          end
-        end
-        if not template_child then
-          for k = j + 1, #group.children do
-            if child_matched[k] and group.children[k].prefix == group.children[j].prefix then
-              template_child = orig_children[child_matched[k]]
-              break
-            end
-          end
-        end
-        if not template_child then
-          for _, c in ipairs(orig_children) do
-            if c.display_type == group.children[j].prefix then
-              template_child = c
-              break
-            end
-          end
-        end
-
-        if template_child then
-          local new_child_name = next_suffix_name(template_child.name, child_existing_names)
-          child_existing_names[new_child_name] = true
-
-          local new_child_lines = rename_in_lines(template_child.lines, template_child.name, new_child_name)
-          table.insert(ordered_children, {
-            name = new_child_name,
-            display_type = template_child.display_type,
-            arity = template_child.arity,
-            start_row = template_child.start_row,
-            decl_start_row = template_child.decl_start_row,
-            end_row = template_child.end_row,
-            lines = new_child_lines,
-            access = template_child.access,
-          })
-        end
-      end
-    end
-
-    -- Check if any child has new comments
-    local has_child_new_comments = false
-    for _, child_group in ipairs(group.children) do
-      if child_group.new_comments and #child_group.new_comments > 0 then
-        has_child_new_comments = true
-        changes_made = true
-        break
-      end
-    end
-
-    -- Reconstruct if children were reordered, duplicated, deleted, or have new comments
-    local has_child_deletions = #orig_children ~= #(orig_entry.children or {})
-    if has_child_deletions then
-      changes_made = true
-    end
-    if children_order_changed(child_matched, #orig_children) then
-      changes_made = true
-    end
-
-    -- Check if any sub-child was reconstructed (lines differ from original)
-    local sub_children_changed = false
-    for j, oc in ipairs(ordered_children) do
-      if child_matched[j] then
-        local orig_child = orig_children[child_matched[j]]
-        if oc.lines ~= orig_child.lines then
-          sub_children_changed = true
-          break
-        end
-      end
-    end
-
-    -- Check if any child's access specifier changed
-    local access_changed = false
-    for j, oc in ipairs(ordered_children) do
-      if child_matched[j] then
-        local orig_child = orig_children[child_matched[j]]
-        if oc.access ~= orig_child.access then
-          access_changed = true
-          changes_made = true
-          break
-        end
-      end
-    end
-
-    local did_reconstruct = has_child_duplicates or has_child_deletions or children_order_changed(child_matched, #orig_children) or has_child_new_comments or sub_children_changed or access_changed
-    local child_offsets = nil
-    if did_reconstruct then
-      local lp = lang.comment_prefix or "//"
-      entry_copy.lines, child_offsets = reconstruct_parent(orig_entry, ordered_children, child_matched, group.children, lp, orig_children)
-    end
-
-    -- Annotate renames with positions from child_offsets.
-    -- For renames created at this level, compute their declaration row as
-    -- an offset within entry_copy.lines. Tag with the entry_copy reference
-    -- so the caller can resolve to absolute position.
-    for _, r in ipairs(renames) do
-      if r.child_index and not r.rename_line then
-        local decl_line_text
-        local decl_row_in_parent
-
-        if child_offsets and child_offsets[r.child_index] then
-          decl_row_in_parent = child_offsets[r.child_index].decl_offset
-          decl_line_text = entry_copy.lines[decl_row_in_parent + 1]
-        else
-          local child = ordered_children[r.child_index]
-          if child then
-            decl_row_in_parent = child.decl_start_row - entry_copy.start_row
-            decl_line_text = entry_copy.lines[decl_row_in_parent + 1]
-          end
-        end
-
-        if decl_line_text and decl_row_in_parent then
-          -- For dotted/colon names (e.g., Animal.Speak, M.greet), search for the last segment
-          local search_name = r.old_name
-          local sep_pos = search_name:find("[%.:]([^%.:]*)$")
-          if sep_pos then
-            search_name = search_name:sub(sep_pos + 1)
-          end
-          local pattern = "%f[%w_]" .. vim.pesc(search_name) .. "%f[^%w_]"
-          local col = decl_line_text:find(pattern)
-          if col then
-            r.rename_line = decl_row_in_parent
-            r.rename_col = col - 1
-            r.owner_entry = entry_copy
-          end
-        end
-        r.child_index = nil
-      end
-    end
-
-    -- Adjust sub-child renames: any rename whose owner_entry is one of the
-    -- ordered_children needs its offset adjusted to be relative to entry_copy.lines.
-    for _, r in ipairs(renames) do
-      if r.owner_entry and r.rename_line then
-        for ci, oc in ipairs(ordered_children) do
-          if r.owner_entry == oc then
-            local child_start_in_parent
-            if child_offsets and child_offsets[ci] then
-              -- Reconstruction happened: use tracked offset
-              child_start_in_parent = child_offsets[ci].start_offset
-            else
-              -- No reconstruction: compute from original positions
-              child_start_in_parent = oc.start_row - entry_copy.start_row
-            end
-            r.rename_line = child_start_in_parent + r.rename_line
-            r.owner_entry = entry_copy
-            break
-          end
-        end
-      end
-    end
-
-    return nil
-  end
+  local state = { renames = renames, allow_deletions = allow_deletions, lang = lang, changes_made = changes_made }
 
   -- Build ordered entries, handling child reordering and duplicates
   local ordered_entries = {}
@@ -1098,27 +1113,19 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         children = template.children and vim.deepcopy(template.children) or nil,
         is_duplicate = true,
       }
-      changes_made = true
+      state.changes_made = true
     end
 
     -- Recursively process children at all depths (skip for duplicates)
     local orig_entry = parent_matched[i] and original_entries[parent_matched[i]] or nil
     if not entry_copy.is_duplicate and orig_entry then
-      local child_result = process_children_recursive(entry_copy, orig_entry, group)
+      local child_result = process_children_recursive(entry_copy, orig_entry, group, state)
       if child_result then
         return child_result.ok, child_result.err, child_result.renames or {}, child_result.deletions, child_result.affected
       end
     end
 
-    -- Detect top-level rename AFTER children are processed so entry_copy has final lines.
-    -- Skip renames for non-renameable types (control flow, expressions) — their display
-    -- names are descriptive text, not symbol identifiers.
-    local NON_RENAMEABLE = {
-      ["if"] = true, ["while"] = true, ["for"] = true, ["switch"] = true,
-      ["try"] = true, ["do"] = true, ["with"] = true, ["select"] = true,
-      ["assert"] = true, ["expression"] = true, ["call"] = true,
-      ["go"] = true, ["defer"] = true, ["repeat"] = true,
-    }
+    -- Detect top-level rename AFTER children are processed so entry_copy has final lines
     if parent_matched[i] then
       local p = parent_parsed[i]
       if p.name ~= entry_copy.name and not NON_RENAMEABLE[entry_copy.display_type] then
@@ -1214,35 +1221,10 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
     local group = parsed_groups[i]
     local has_new_comments = group.new_comments and #group.new_comments > 0
     if has_new_comments then
-      changes_made = true
+      state.changes_made = true
     end
     local comment_line_count = entry.decl_start_row - entry.start_row
-
-    if has_new_comments and comment_line_count > 0 then
-      -- Entry has existing comments: insert existing comments, then new comments, then declaration
-      for j = 1, comment_line_count do
-        table.insert(result, entry.lines[j])
-      end
-      for _, comment_line in ipairs(group.new_comments) do
-        table.insert(result, translate_comment(comment_line, lang_prefix))
-      end
-      for j = comment_line_count + 1, #entry.lines do
-        table.insert(result, entry.lines[j])
-      end
-    elseif has_new_comments then
-      -- No existing comments: insert new comments, then the entry
-      for _, comment_line in ipairs(group.new_comments) do
-        table.insert(result, translate_comment(comment_line, lang_prefix))
-      end
-      for _, line in ipairs(entry.lines) do
-        table.insert(result, line)
-      end
-    else
-      -- No new comments: just add the entry as-is
-      for _, line in ipairs(entry.lines) do
-        table.insert(result, line)
-      end
-    end
+    insert_lines_with_comments(result, entry.lines, comment_line_count, group.new_comments, lang_prefix)
 
     -- Add the trailing gap from the original entry (skip for last entry to avoid trailing whitespace)
     if i < #ordered_entries then
@@ -1263,13 +1245,13 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   end
 
   -- Resolve rename positions.
-  -- When changes_made is true, positions are relative to `result` (the reconstructed buffer).
-  -- When changes_made is false, use original entry positions directly (result may differ from source).
+  -- When state.changes_made is true, positions are relative to `result` (the reconstructed buffer).
+  -- When state.changes_made is false, use original entry positions directly (result may differ from source).
   for _, r in ipairs(renames) do
     if r.owner_entry and r.rename_line then
       -- Child rename: owner_entry should be a top-level ordered_entry after
       -- offset adjustments propagated up through process_children_recursive.
-      if changes_made then
+      if state.changes_made then
         -- Find which top-level entry it is and add its base row from result.
         for ei, oe in ipairs(ordered_entries) do
           if r.owner_entry == oe then
@@ -1288,7 +1270,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
       local entry = ordered_entries[ei]
       if entry then
         local decl_line_text
-        if changes_made then
+        if state.changes_made then
           local base = entry_start_rows[ei]
           local new_comment_count = 0
           local group = parsed_groups[ei]
@@ -1306,11 +1288,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         end
         if decl_line_text then
           -- For dotted/colon names, search for the last segment
-          local search_name = r.old_name
-          local sep_pos = search_name:find("[%.:]([^%.:]*)$")
-          if sep_pos then
-            search_name = search_name:sub(sep_pos + 1)
-          end
+          local search_name = get_search_name(r.old_name)
           local pattern = "%f[%w_]" .. vim.pesc(search_name) .. "%f[^%w_]"
           local col = decl_line_text:find(pattern)
           if col then
@@ -1330,11 +1308,11 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   end
 
   -- Apply changes using minimal diff (only if changes were detected)
-  if changes_made then
+  if state.changes_made then
     diff.apply_minimal(source_bufnr, result)
   end
 
-  return true, nil, renames, nil, affected_rows, changes_made
+  return true, nil, renames, nil, affected_rows, state.changes_made
 end
 
 return M

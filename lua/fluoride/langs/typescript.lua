@@ -86,6 +86,16 @@ M.highlights = {
   ["do"]                      = { prefix = "Keyword",  name = "Identifier" },
 }
 
+local STATEMENT_MAP = {
+  if_statement = "if",
+  while_statement = "while",
+  for_statement = "for",
+  for_in_statement = "for",
+  switch_statement = "switch",
+  try_statement = "try",
+  do_statement = "do",
+}
+
 --- Check if a top-level node is a code point (not a skip type).
 --- @param node any treesitter node
 --- @return boolean
@@ -364,16 +374,6 @@ function M.get_display_type(node, bufnr)
     end
   end
 
-  -- Statement types
-  local STATEMENT_MAP = {
-    if_statement = "if",
-    while_statement = "while",
-    for_statement = "for",
-    for_in_statement = "for",
-    switch_statement = "switch",
-    try_statement = "try",
-    do_statement = "do",
-  }
   if STATEMENT_MAP[node_type] then
     return STATEMENT_MAP[node_type]
   end

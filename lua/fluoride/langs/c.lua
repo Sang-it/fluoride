@@ -434,4 +434,18 @@ function M.is_child_declaration(node)
   return C_CHILD_TYPES[t] or false
 end
 
+--- Extract access specifier label from an access_specifier node.
+--- @param node any treesitter node
+--- @param bufnr number buffer handle
+--- @return string|nil "public", "protected", or "private"
+function M.get_access_specifier(node, bufnr)
+  if node:type() == "access_specifier" then
+    local text = vim.treesitter.get_node_text(node, bufnr)
+    -- The colon is a separate sibling node, so text is just "public"/"protected"/"private"
+    local spec = text:match("^(%w+)")
+    return spec
+  end
+  return nil
+end
+
 return M

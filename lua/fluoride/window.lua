@@ -53,7 +53,16 @@ local function add_entry_lines(lines, flat_map, entry, depth, max_depth, path)
   table.insert(flat_map, { entry = entry, depth = depth, path = vim.deepcopy(path) })
 
   if depth < max_depth and entry.children and #entry.children > 0 then
+    local last_access = nil
     for j, child in ipairs(entry.children) do
+      -- Insert access specifier separator when access changes (C/C++ public/protected/private)
+      if child.access and child.access ~= last_access then
+        local sep_prefix = string.rep("  ", depth + 1)
+        table.insert(lines, sep_prefix .. "-- " .. child.access)
+        table.insert(flat_map, { entry = nil, depth = depth + 1, path = nil, is_separator = true })
+      end
+      last_access = child.access
+
       local child_path = vim.deepcopy(path)
       table.insert(child_path, j)
       add_entry_lines(lines, flat_map, child, depth + 1, max_depth, child_path)
@@ -91,8 +100,14 @@ local function apply_highlights(buf, highlights, sorted_prefixes)
   for i, line in ipairs(lines) do
     local lnum = i - 1 -- 0-indexed
 
-    -- Check if this is a user-written comment line (starts with //)
+    -- Check if this is an access specifier separator (-- public, -- protected, -- private)
     local trimmed = vim.trim(line)
+    if trimmed:match("^%-%- %w+$") then
+      vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, 0, -1)
+      goto continue
+    end
+
+    -- Check if this is a user-written comment line (starts with //)
     if trimmed:sub(1, 2) == "//" then
       vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, 0, -1)
       goto continue
@@ -364,7 +379,7 @@ function M.open(source_bufnr, entries, lang, config)
   map(km.jump or "<CR>", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
-    if not map_entry then return end
+    if not map_entry or not map_entry.entry then return end
 
     local source_win = find_source_win()
     if source_win then
@@ -393,7 +408,7 @@ function M.open(source_bufnr, entries, lang, config)
   map(km.peek or "gd", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
-    if not map_entry then return end
+    if not map_entry or not map_entry.entry then return end
 
     local source_win = find_source_win()
     if source_win then
@@ -420,7 +435,7 @@ function M.open(source_bufnr, entries, lang, config)
   map(km.hover or "K", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
-    if not map_entry then return end
+    if not map_entry or not map_entry.entry then return end
 
     local source_win = find_source_win()
     if source_win then
@@ -463,7 +478,7 @@ function M.open(source_bufnr, entries, lang, config)
   map(km.yank or "gy", function()
     local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
     local map_entry = flat_map[cursor_line]
-    if not map_entry then return end
+    if not map_entry or not map_entry.entry then return end
 
     local source_win = find_source_win()
     if source_win then

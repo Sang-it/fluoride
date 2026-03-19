@@ -250,10 +250,27 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     end
   end
 
+  -- Check if children have access specifiers (C/C++ public/protected/private)
+  local has_access_specifiers = false
+  for _, child in ipairs(orig_children) do
+    if child.access then
+      has_access_specifiers = true
+      break
+    end
+  end
+
   -- Header: from parent start to first child start (in original layout)
+  -- Strip access specifier lines from header if present (they'll be re-inserted during reassembly)
   local header = {}
   for row = parent.start_row, min_child_row - 1 do
-    table.insert(header, parent.lines[row - parent.start_row + 1])
+    local line = parent.lines[row - parent.start_row + 1]
+    local stripped = line and vim.trim(line) or ""
+    if has_access_specifiers and (stripped == "public:" or stripped == "protected:" or stripped == "private:"
+      or stripped == "public" or stripped == "protected" or stripped == "private") then
+      -- Skip — will be re-inserted by the reassembly loop
+    else
+      table.insert(header, line)
+    end
   end
 
   -- Footer: from after last child end to parent end (in original layout)
@@ -278,7 +295,9 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     end
   end
 
-  -- Collect trailing gaps between consecutive FILTERED children
+  -- Collect trailing gaps between consecutive FILTERED children.
+  -- If children have access specifiers, filter out access specifier lines from gaps
+  -- so they don't travel with reordered children.
   local child_trailing_gaps = {}
   for i = 1, #orig_children do
     child_trailing_gaps[i] = {}
@@ -288,9 +307,36 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
       if gap_end >= gap_start then
         for row = gap_start, gap_end do
           if not deleted_child_rows[row] then
-            table.insert(child_trailing_gaps[i], parent.lines[row - parent.start_row + 1])
+            local line = parent.lines[row - parent.start_row + 1]
+            -- Skip access specifier lines (e.g., "    public:", "    protected:", "    private:")
+            local stripped = line and vim.trim(line) or ""
+            if has_access_specifiers and (stripped == "public:" or stripped == "protected:" or stripped == "private:"
+              or stripped == "public" or stripped == "protected" or stripped == "private") then
+              -- Don't include access specifier lines in gaps
+            else
+              table.insert(child_trailing_gaps[i], line)
+            end
           end
         end
+      end
+    end
+  end
+
+  -- Determine access specifier indentation from the original source (for re-insertion)
+  local access_indent = ""
+  if has_access_specifiers then
+    -- Find the first access specifier line in the parent's lines to get indentation
+    for _, line in ipairs(parent.lines) do
+      local indent, spec = line:match("^(%s*)(public|protected|private)")
+      if not indent then
+        -- Lua doesn't have alternation; check each keyword
+        indent = line:match("^(%s*)public%s*:?%s*$")
+          or line:match("^(%s*)protected%s*:?%s*$")
+          or line:match("^(%s*)private%s*:?%s*$")
+      end
+      if indent then
+        access_indent = indent
+        break
       end
     end
   end
@@ -302,7 +348,13 @@ local function reconstruct_parent(parent, ordered_children, child_matched, child
     table.insert(result, line)
   end
 
+  local last_access = nil
   for i, child in ipairs(ordered_children) do
+    -- Insert access specifier line when the access section changes
+    if has_access_specifiers and child.access and child.access ~= last_access then
+      table.insert(result, access_indent .. child.access .. ":")
+    end
+    last_access = child.access
     -- Track where this child's lines start in the result (0-indexed offset)
     local child_start = #result
 
@@ -415,12 +467,24 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   -- Stack of entries at each depth: stack[depth] = most recent entry at that depth
   local stack = {} -- stack[0] = nil (top-level entries go to parsed_groups)
   local pending_comments = {} -- comment lines waiting to be attached to the next entry
+  local access_at_depth = {} -- track current access specifier per depth level
 
   for _, line in ipairs(new_display_lines) do
     local trimmed = vim.trim(line)
 
+    -- Track access specifier separator lines (-- public, -- protected, -- private)
+    local access_spec = trimmed:match("^%-%- (%w+)$")
+    if access_spec then
+      -- Determine the depth of this separator from indentation
+      local depth = 0
+      local leading = line:match("^(%s*)")
+      if leading and #leading > 0 and #leading % 2 == 0 then
+        depth = #leading / 2
+      end
+      access_at_depth[depth] = access_spec
+
     -- Check if this is a new comment line (starts with //)
-    if trimmed:sub(1, 2) == "//" then
+    elseif trimmed:sub(1, 2) == "//" then
       table.insert(pending_comments, trimmed)
     else
       local depth, content = parse_line_depth(line)
@@ -430,7 +494,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
         return false, "could not parse line: " .. line, {}, nil, nil
       end
 
-      local node = { prefix = prefix, name = name, children = {}, new_comments = pending_comments }
+      local node = { prefix = prefix, name = name, children = {}, new_comments = pending_comments, access = access_at_depth[depth] }
       pending_comments = {}
 
       if depth == 0 then
@@ -751,7 +815,16 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
           end_row = orig_child.end_row,
           lines = orig_child.lines, -- will be replaced by reconstruct_parent if sub-children changed
           children = orig_child.children,
+          access = orig_child.access,
         }
+
+        -- Update access if the user moved the child to a different access section
+        if group.children[j].access then
+          if child_copy.access ~= group.children[j].access then
+            child_copy.access = group.children[j].access
+            changes_made = true
+          end
+        end
 
         -- Recurse FIRST: process this child's own children (bottom-up)
         -- This may replace child_copy.lines with reconstructed content.
@@ -814,6 +887,7 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
             decl_start_row = template_child.decl_start_row,
             end_row = template_child.end_row,
             lines = new_child_lines,
+            access = template_child.access,
           })
         end
       end
@@ -850,7 +924,20 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
       end
     end
 
-    local did_reconstruct = has_child_duplicates or has_child_deletions or children_order_changed(child_matched, #orig_children) or has_child_new_comments or sub_children_changed
+    -- Check if any child's access specifier changed
+    local access_changed = false
+    for j, oc in ipairs(ordered_children) do
+      if child_matched[j] then
+        local orig_child = orig_children[child_matched[j]]
+        if oc.access ~= orig_child.access then
+          access_changed = true
+          changes_made = true
+          break
+        end
+      end
+    end
+
+    local did_reconstruct = has_child_duplicates or has_child_deletions or children_order_changed(child_matched, #orig_children) or has_child_new_comments or sub_children_changed or access_changed
     local child_offsets = nil
     if did_reconstruct then
       local lp = lang.comment_prefix or "//"

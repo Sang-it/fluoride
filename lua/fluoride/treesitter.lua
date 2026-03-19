@@ -153,11 +153,21 @@ local function process_siblings(siblings, lang, bufnr, is_decl_fn)
   local comment_types = lang.comment_types or {}
   local entries = {}
   local nodes = {}
+  local last_access = nil -- track current access specifier (public/protected/private)
 
   for i, child in ipairs(siblings) do
     -- Skip treesitter error nodes (incomplete/broken syntax)
     if child:type() == "ERROR" then
       goto continue_siblings
+    end
+
+    -- Check if this sibling is an access specifier (C/C++ public:/protected:/private:)
+    if lang.get_access_specifier then
+      local access = lang.get_access_specifier(child, bufnr)
+      if access then
+        last_access = access
+        goto continue_siblings
+      end
     end
 
     if is_decl_fn(child) then
@@ -168,6 +178,7 @@ local function process_siblings(siblings, lang, bufnr, is_decl_fn)
 
       local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
       if ok and entry then
+        entry.access = last_access
         table.insert(entries, entry)
         table.insert(nodes, child)
       end

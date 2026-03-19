@@ -142,14 +142,17 @@ local function find_comment_start(siblings, decl_index, comment_types)
 end
 
 --- Process a list of sibling nodes into entries, attaching leading comments.
+--- Returns both entries and their corresponding treesitter nodes (for recursion).
 --- @param siblings table[] list of sibling treesitter nodes
 --- @param lang FluorideLang language module
 --- @param bufnr number buffer handle
 --- @param is_decl_fn fun(node): boolean function to check if a node is a declaration
 --- @return table[] entries
+--- @return table[] nodes the treesitter nodes corresponding to each entry
 local function process_siblings(siblings, lang, bufnr, is_decl_fn)
   local comment_types = lang.comment_types or {}
   local entries = {}
+  local nodes = {}
 
   for i, child in ipairs(siblings) do
     -- Skip treesitter error nodes (incomplete/broken syntax)
@@ -166,13 +169,53 @@ local function process_siblings(siblings, lang, bufnr, is_decl_fn)
       local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
       if ok and entry then
         table.insert(entries, entry)
+        table.insert(nodes, child)
       end
     end
 
     ::continue_siblings::
   end
 
-  return entries
+  return entries, nodes
+end
+
+--- Recursively extract children from a nestable node and populate entry.children.
+--- @param entry table the entry to populate children for
+--- @param node any the treesitter node corresponding to this entry
+--- @param lang FluorideLang language module
+--- @param bufnr number buffer handle
+local function extract_children_recursive(entry, node, lang, bufnr)
+  if not lang.is_nestable or not lang.get_body_node or not lang.is_child_declaration then
+    return
+  end
+  if not lang.is_nestable(node) then
+    return
+  end
+
+  local body = lang.get_body_node(node)
+  if not body then
+    return
+  end
+
+  -- Collect all body children
+  local body_children = {}
+  for grandchild in body:iter_children() do
+    table.insert(body_children, grandchild)
+  end
+
+  -- Process children with comment attachment
+  local child_entries, child_nodes = process_siblings(body_children, lang, bufnr, function(n)
+    return lang.is_child_declaration(n)
+  end)
+
+  if #child_entries > 0 then
+    entry.children = child_entries
+
+    -- Recurse into each child that is itself nestable
+    for j, child_entry in ipairs(child_entries) do
+      extract_children_recursive(child_entry, child_nodes[j], lang, bufnr)
+    end
+  end
 end
 
 --- Extract all top-level declarations from a buffer using the appropriate language module.
@@ -227,28 +270,8 @@ function M.get_code_points(bufnr)
 
       local ok, entry = pcall(build_entry, child, lang, bufnr, sr_override)
       if ok and entry then
-        -- Check if this node has nestable children (e.g., methods in a class/impl)
-        if lang.is_nestable and lang.get_body_node and lang.is_child_declaration then
-          if lang.is_nestable(child) then
-            local body = lang.get_body_node(child)
-            if body then
-              -- Collect all body children
-              local body_children = {}
-              for grandchild in body:iter_children() do
-                table.insert(body_children, grandchild)
-              end
-
-              -- Process children with comment attachment
-              local child_entries = process_siblings(body_children, lang, bufnr, function(n)
-                return lang.is_child_declaration(n)
-              end)
-
-              if #child_entries > 0 then
-                entry.children = child_entries
-              end
-            end
-          end
-        end
+        -- Recursively extract nestable children (e.g., methods in a class/impl, classes in a namespace)
+        extract_children_recursive(entry, child, lang, bufnr)
 
         table.insert(entries, entry)
       end

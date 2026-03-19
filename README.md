@@ -9,8 +9,8 @@ A structural code editor for Neovim. View, reorder, rename, duplicate, delete, a
 ## Features
 
 - **View** all declarations (functions, classes, variables, types, structs, enums, etc.) in a floating sidebar
-- **Nested declarations** — methods inside classes, fields inside structs, variants inside enums, functions inside impl/trait/namespace blocks
-- **Reorder** declarations by moving lines with vim motions (`dd` + `p`) — saves back to the source file on `:w`
+- **Nested declarations** — methods inside classes, fields inside structs, variants inside enums, functions inside impl/trait/namespace blocks (configurable depth via `max_depth`)
+- **Reorder** declarations by moving lines with vim motions (`dd` + `p`) — saves back to the source file on `:w` (children are protected from being moved outside their parent)
 - **Rename** symbols by editing names — triggers LSP rename across your project
 - **Duplicate** code points by copying lines (`yy` + `p`) — auto-generates suffixed names (`_1`, `_2`)
 - **Delete** code points by removing lines — confirmation prompt before applying (configurable)
@@ -108,7 +108,7 @@ require("fluoride").setup({
     toggle_children = "<Tab>", -- toggle nested members on/off
     yank = "gy",              -- peek + copy code block to clipboard
   },
-  show_children = true,       -- show nested members on open (default: true)
+  max_depth = 1,              -- nesting depth for children (0=none, 1=direct children, 2+=deeper)
   yank_comments = true,       -- include attached comments in yank (default: true)
   confirm_delete = true,      -- prompt before deleting code points (false to skip)
   highlight = {
@@ -143,13 +143,13 @@ Inside the Fluoride window:
 | `dd` + `p` | Reorder a code point |
 | `yy` + `p` | Duplicate a code point (auto-suffixed name) |
 | `dd` | Delete a code point (confirmed on `:w`) |
-| `<Tab>` | Toggle nested members (methods, fields, variants) on/off |
+| `<Tab>` | Cycle nested members depth (0 → 1 → ... → max_depth → 0) |
 | `gy` | Peek + copy code block to clipboard (vim register and system clipboard) |
 
 ## Workflow
 
 1. Open a supported file and run `:Fluoride`
-2. The sidebar shows all declarations with nested children:
+2. The sidebar shows all declarations with nested children (depth controlled by `max_depth`):
    ```
    const MAX_CONNECTIONS
    interface ServerConfig
@@ -157,10 +157,11 @@ Inside the Fluoride window:
      • property port
      • property debug
    function createLogger/1
-   class ConnectionPool
-     • method add/1
-     • method remove/1
-     • method getActive/0
+   namespace Services                    -- with max_depth = 2
+     • class ConnectionPool
+       • method add/1                    -- depth 2 children visible
+       • method remove/1
+       • method getActive/0
    export function startServer/1
    export const DEFAULT_CONFIG
    ```

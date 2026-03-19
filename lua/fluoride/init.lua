@@ -27,7 +27,7 @@ local DEFAULT_CONFIG = {
     toggle_children = "<Tab>",
     yank = "gy",
   },
-  show_children = true,
+  max_depth = 1,
   yank_comments = true,
   confirm_delete = true,
   highlight = {
@@ -42,6 +42,10 @@ M.config = vim.deepcopy(DEFAULT_CONFIG)
 --- @param user_config? table
 function M.setup(user_config)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULT_CONFIG), user_config or {})
+  -- Backwards compatibility: translate show_children to max_depth
+  if user_config and user_config.show_children ~= nil and user_config.max_depth == nil then
+    M.config.max_depth = user_config.show_children and 1 or 0
+  end
 end
 
 --- Open the Fluoride floating window for the current buffer.

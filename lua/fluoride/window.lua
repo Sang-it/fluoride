@@ -5,10 +5,6 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace("fluoride_hl")
 
--- Child indentation
-local CHILD_PREFIX = "  • " -- 2 spaces + bullet + space
-local CHILD_PREFIX_LEN = #CHILD_PREFIX
-
 --- Build a sorted list of prefixes from a highlights table (longest first).
 --- @param highlights table<string, table> map of display_type → { prefix, name }
 --- @return string[] sorted_prefixes
@@ -33,26 +29,50 @@ local function entry_display(entry)
   return display
 end
 
+--- Build the indentation prefix for a given nesting depth.
+--- @param depth number nesting depth (0 = top-level, 1 = child, 2 = grandchild, etc.)
+--- @return string prefix
+local function depth_prefix(depth)
+  if depth == 0 then
+    return ""
+  end
+  -- Each depth level: 2 spaces of indent per level, then bullet + space
+  return string.rep("  ", depth) .. "• "
+end
+
+--- Recursively add display lines for an entry and its children.
+--- @param lines string[] accumulator for display lines
+--- @param flat_map table[] accumulator for flat entry map
+--- @param entry table code point entry
+--- @param depth number current nesting depth (0 = top-level)
+--- @param max_depth number maximum depth to display children
+--- @param path number[] ancestor indices path
+local function add_entry_lines(lines, flat_map, entry, depth, max_depth, path)
+  local prefix = depth_prefix(depth)
+  table.insert(lines, prefix .. entry_display(entry))
+  table.insert(flat_map, { entry = entry, depth = depth, path = vim.deepcopy(path) })
+
+  if depth < max_depth and entry.children and #entry.children > 0 then
+    for j, child in ipairs(entry.children) do
+      local child_path = vim.deepcopy(path)
+      table.insert(child_path, j)
+      add_entry_lines(lines, flat_map, child, depth + 1, max_depth, child_path)
+    end
+  end
+end
+
 --- Build display lines and a flat entry map from code point entries.
---- The flat_map maps each 1-indexed buffer line to its entry (parent or child).
+--- The flat_map maps each 1-indexed buffer line to its entry with depth and path.
 --- @param entries table[] list of code point entries from treesitter module
---- @param with_children boolean whether to include nested child entries
+--- @param max_depth number maximum nesting depth to display (0 = no children)
 --- @return string[] display_lines
---- @return table[] flat_map list of { entry, parent_index, child_index }
-local function build_display_lines(entries, with_children)
+--- @return table[] flat_map list of { entry, depth, path }
+local function build_display_lines(entries, max_depth)
   local lines = {}
   local flat_map = {}
 
   for i, entry in ipairs(entries) do
-    table.insert(lines, entry_display(entry))
-    table.insert(flat_map, { entry = entry, parent_index = i, child_index = nil })
-
-    if with_children and entry.children and #entry.children > 0 then
-      for j, child in ipairs(entry.children) do
-        table.insert(lines, CHILD_PREFIX .. entry_display(child))
-        table.insert(flat_map, { entry = child, parent_index = i, child_index = j })
-      end
-    end
+    add_entry_lines(lines, flat_map, entry, 0, max_depth, { i })
   end
 
   return lines, flat_map
@@ -78,16 +98,21 @@ local function apply_highlights(buf, highlights, sorted_prefixes)
       goto continue
     end
 
-    -- Detect indentation (tree chars or spaces)
+    -- Detect indentation depth by counting leading "  " units before "• "
     local content_start = 0
-    local is_child = false
+    local depth = 0
 
-    -- Check for child indent prefix
-    if line:sub(1, CHILD_PREFIX_LEN) == CHILD_PREFIX then
-      content_start = CHILD_PREFIX_LEN
-      is_child = true
-      -- Highlight the bullet as Comment
-      vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, 0, CHILD_PREFIX_LEN)
+    -- Check for nested child indent prefixes at any depth
+    local bullet_pos = line:find("• ", 1, true)
+    if bullet_pos then
+      -- All characters before the bullet should be spaces (2 per depth level)
+      local leading = line:sub(1, bullet_pos - 1)
+      if leading:match("^%s*$") and #leading > 0 and #leading % 2 == 0 then
+        depth = #leading / 2
+        content_start = bullet_pos + #("• ") - 1 -- after "• " (bullet is multi-byte)
+        -- Highlight the indent + bullet as Comment
+        vim.api.nvim_buf_add_highlight(buf, ns, "Comment", lnum, 0, content_start)
+      end
     end
 
     local content = line:sub(content_start + 1)
@@ -225,7 +250,7 @@ function M.open(source_bufnr, entries, lang, config)
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
 
   -- Populate the buffer with display lines (placeholder, repopulated after config is read)
-  local display_lines, flat_map = build_display_lines(entries, true)
+  local display_lines, flat_map = build_display_lines(entries, 0)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
 
   -- Mark the buffer as unmodified after initial population
@@ -240,11 +265,12 @@ function M.open(source_bufnr, entries, lang, config)
   local hl_config = config and config.highlight or {}
   local peek_duration = hl_config.peek_duration or 200
   local rename_duration = hl_config.rename_duration or 130
-  local show_children = config and config.show_children ~= false
+  local configured_max_depth = config and config.max_depth or 1
+  local current_depth = configured_max_depth
   local win = open_sidebar(buf, win_config)
 
-  -- Repopulate with correct show_children state
-  display_lines, flat_map = build_display_lines(entries, show_children)
+  -- Repopulate with correct depth state
+  display_lines, flat_map = build_display_lines(entries, current_depth)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
   vim.api.nvim_set_option_value("modified", false, { buf = buf })
 
@@ -417,16 +443,20 @@ function M.open(source_bufnr, entries, lang, config)
     end
   end, "LSP hover for code point")
 
-  -- Toggle child declarations visibility
+  -- Cycle child declarations depth visibility
   map(km.toggle_children or "<Tab>", function()
-    show_children = not show_children
-    local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
+    if current_depth >= configured_max_depth then
+      current_depth = 0
+    else
+      current_depth = current_depth + 1
+    end
+    local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
     flat_map = new_flat_map
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
     vim.api.nvim_set_option_value("modified", false, { buf = buf })
     apply_highlights(buf, highlights, sorted_prefixes)
     update_footer()
-  end, "Toggle child declarations")
+  end, "Cycle child declarations depth")
 
   -- Peek + copy code block
   local yank_comments = config and config.yank_comments ~= false
@@ -563,24 +593,35 @@ function M.open(source_bufnr, entries, lang, config)
           local source_win = find_source_win()
           if not source_win then return end
 
-          -- Find affected entries in the current entries list by name
+          -- Find affected entries by matching name + declaration row.
+          -- Each affected item has { new_name, decl_row } from the result buffer.
+          -- After LSP rename, rows may shift slightly, so find the entry with
+          -- matching name whose decl_start_row is closest to decl_row.
           local to_flash = {}
-          local affected_set = {}
-          for _, name in ipairs(affected) do
-            affected_set[name] = true
-          end
 
-          -- Collect matching entries (top-level and children)
-          for _, entry in ipairs(entries) do
-            if affected_set[entry.name] then
-              table.insert(to_flash, entry)
-            end
-            if entry.children then
-              for _, child in ipairs(entry.children) do
-                if affected_set[child.name] then
-                  table.insert(to_flash, child)
+          local function collect_affected(entry_list)
+            for _, entry in ipairs(entry_list) do
+              for ai, a in ipairs(affected) do
+                if entry.name == a.new_name then
+                  -- Check if this entry's position is close to the expected row
+                  local dist = math.abs(entry.decl_start_row - a.decl_row)
+                  if not a.best_entry or dist < a.best_dist then
+                    a.best_entry = entry
+                    a.best_dist = dist
+                  end
                 end
               end
+              if entry.children then
+                collect_affected(entry.children)
+              end
+            end
+          end
+          collect_affected(entries)
+
+          -- Collect the best matches
+          for _, a in ipairs(affected) do
+            if a.best_entry then
+              table.insert(to_flash, a.best_entry)
             end
           end
 
@@ -634,7 +675,7 @@ function M.open(source_bufnr, entries, lang, config)
           local new_entries, _ = treesitter.get_code_points(source_bufnr)
           if #new_entries > 0 then
             entries = new_entries
-            local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
+            local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
             flat_map = new_flat_map
             vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
             vim.api.nvim_set_option_value("modified", false, { buf = buf })
@@ -739,11 +780,11 @@ function M.open(source_bufnr, entries, lang, config)
         local new_entries, _ = treesitter.get_code_points(source_bufnr)
         if #new_entries > 0 then
           entries = new_entries
-          local new_display_lines, new_flat_map = build_display_lines(entries, show_children)
-          flat_map = new_flat_map
-          vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
-          vim.api.nvim_set_option_value("modified", false, { buf = buf })
-          apply_highlights(buf, highlights, sorted_prefixes)
+           local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
+           flat_map = new_flat_map
+           vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+           vim.api.nvim_set_option_value("modified", false, { buf = buf })
+           apply_highlights(buf, highlights, sorted_prefixes)
           update_footer()
         end
       end)

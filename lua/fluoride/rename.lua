@@ -57,10 +57,15 @@ function M.apply_renames(bufnr, renames, on_done)
     local old_name = r.old_name
     local new_name = r.new_name
 
-    -- Re-find the symbol position in the current state of the buffer
-    -- Search the entire buffer since reordering may have moved things
-    local total_lines = vim.api.nvim_buf_line_count(bufnr)
-    local line, col = find_symbol_position(bufnr, old_name, 0, total_lines - 1)
+    -- Use exact position if available, otherwise search the buffer
+    local line, col
+    if r.rename_line and r.rename_col then
+      line = r.rename_line
+      col = r.rename_col
+    else
+      local total_lines = vim.api.nvim_buf_line_count(bufnr)
+      line, col = find_symbol_position(bufnr, old_name, 0, total_lines - 1)
+    end
 
     if not line or not col then
       vim.notify(

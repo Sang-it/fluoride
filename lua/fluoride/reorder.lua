@@ -534,12 +534,31 @@ function M.apply(source_bufnr, original_entries, new_display_lines, lang, allow_
   end
   build_allowed_parents(original_entries, nil)
 
+  -- Build original child count per parent for validation
+  local orig_child_counts = {} -- parent_key → count
+  local function build_child_counts(entry_list, pkey)
+    for _, entry in ipairs(entry_list) do
+      local key = entry.display_type .. " " .. entry.name
+      if entry.children then
+        orig_child_counts[key] = #entry.children
+        build_child_counts(entry.children, key)
+      end
+    end
+  end
+  build_child_counts(original_entries, nil)
+
   local function validate_parents(group_list, parent_key)
     for _, group in ipairs(group_list) do
       local allowed = allowed_parents[group.name]
       if allowed and not allowed[parent_key or ""] then
-        return false, "cannot move '" .. (group.prefix or "") .. " " .. group.name
-          .. "' outside its parent"
+        -- This name exists in the original tree under a different parent.
+        -- Only flag if the current parent has MORE children than it originally had
+        -- (indicating a child was actually moved in, not just renamed to a colliding name).
+        local expected_count = orig_child_counts[parent_key or ""] or #group_list
+        if #group_list > expected_count then
+          return false, "cannot move '" .. (group.prefix or "") .. " " .. group.name
+            .. "' outside its parent"
+        end
       end
       if group.children and #group.children > 0 then
         local key = (group.prefix or "") .. " " .. group.name

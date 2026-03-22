@@ -206,11 +206,11 @@ local function apply_highlights(buf, highlights, sorted_prefixes)
   end
 end
 
---- Create a floating window positioned on the right side with padding.
---- @param buf number buffer handle
+--- Compute sidebar geometry, avoiding the source window when splits exist.
+--- @param source_win number|nil source window handle
 --- @param win_config table window configuration from plugin config
---- @return number win window handle
-local function open_sidebar(buf, win_config)
+--- @return number width, number height, number row, number col
+local function compute_sidebar_geometry(source_win, win_config)
   local sidebar = win_config.sidebar or {}
   local centered = win_config.centered or {}
   local width, height, row, col
@@ -222,18 +222,55 @@ local function open_sidebar(buf, win_config)
     row = math.floor((vim.o.lines - height) / 2)
     col = math.floor((vim.o.columns - width) / 2)
   else
-    -- Sidebar layout (default)
+    -- Sidebar dimensions from editor proportions
     width = math.floor(vim.o.columns * (sidebar.width or 0.3))
     height = math.floor(vim.o.lines * (sidebar.height or 0.85))
     row = sidebar.row or 2
-    col = vim.o.columns - width - (sidebar.col or 2)
+
+    -- Place on the far edge that doesn't overlap the focused source window
+    local far_right = vim.o.columns - width - (sidebar.col or 2)
+    local far_left = sidebar.col or 2
+
+    if source_win and vim.api.nvim_win_is_valid(source_win) then
+      local src_pos = vim.api.nvim_win_get_position(source_win)
+      local src_col = src_pos[2]
+      local src_width = vim.api.nvim_win_get_width(source_win)
+      local src_end = src_col + src_width
+
+      -- Check if far right overlaps the source window
+      local right_overlaps = far_right < src_end and (far_right + width) > src_col
+      -- Check if far left overlaps the source window
+      local left_overlaps = far_left < src_end and (far_left + width) > src_col
+
+      if not right_overlaps then
+        col = far_right
+      elseif not left_overlaps then
+        col = far_left
+      else
+        -- Fallback: single window, default to far right
+        col = far_right
+      end
+    else
+      col = far_right
+    end
   end
 
-  -- Clamp dimensions to fit within the editor
-  width = math.min(width, vim.o.columns - 2)
-  height = math.min(height, vim.o.lines - 2)
-  col = math.max(col, 0)
-  row = math.max(row, 0)
+  -- Clamp to editor bounds
+  width = math.max(math.min(width, vim.o.columns - 2), 1)
+  height = math.max(math.min(height, vim.o.lines - 2), 1)
+  col = math.max(math.min(col, vim.o.columns - width - 1), 0)
+  row = math.max(math.min(row, vim.o.lines - height - 1), 0)
+
+  return width, height, row, col
+end
+
+--- Create a floating window positioned relative to the source window.
+--- @param buf number buffer handle
+--- @param win_config table window configuration from plugin config
+--- @param source_win number|nil source window handle
+--- @return number win window handle
+local function open_sidebar(buf, win_config, source_win)
+  local width, height, row, col = compute_sidebar_geometry(source_win, win_config)
 
   local win_opts = {
     relative = "editor",
@@ -305,7 +342,8 @@ function M.open(source_bufnr, entries, lang, config)
   local configured_max_depth = config and config.max_depth or 1
   local current_depth = configured_max_depth
   local collapsed = {} -- per-entry fold state (entry reference -> true)
-  local win = open_sidebar(buf, win_config)
+  local current_source_win = vim.api.nvim_get_current_win()
+  local win = open_sidebar(buf, win_config, current_source_win)
 
   -- Repopulate with correct depth state
   display_lines, flat_map = build_display_lines(entries, current_depth, collapsed)
@@ -389,6 +427,21 @@ function M.open(source_bufnr, entries, lang, config)
       end
     end
     return nil
+  end
+
+  -- Reposition sidebar relative to the current source window
+  local function reposition_sidebar()
+    if not vim.api.nvim_win_is_valid(win) then return end
+    local src_win = find_source_win() or current_source_win
+    if not src_win or not vim.api.nvim_win_is_valid(src_win) then return end
+    local width, height, row, col = compute_sidebar_geometry(src_win, win_config)
+    vim.api.nvim_win_set_config(win, {
+      relative = "editor",
+      width = width,
+      height = height,
+      row = row,
+      col = col,
+    })
   end
 
   -- Close window helper
@@ -643,6 +696,66 @@ function M.open(source_bufnr, entries, lang, config)
     end
   end
 
+  -- Per-buffer state storage for split support
+  local buf_states = {}
+
+  local function save_current_state()
+    buf_states[source_bufnr] = {
+      collapsed_keys = collect_collapsed_keys(entries, nil),
+      current_depth = current_depth,
+    }
+  end
+
+  local function rebuild_display()
+    local new_display_lines, new_flat_map = build_display_lines(entries, current_depth, collapsed)
+    flat_map = new_flat_map
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+    vim.api.nvim_set_option_value("modified", false, { buf = buf })
+    apply_highlights(buf, highlights, sorted_prefixes)
+    apply_fold_indicators(buf, flat_map, current_depth, collapsed)
+    update_footer()
+  end
+
+  local function switch_source(new_bufnr)
+    if new_bufnr == source_bufnr then return end
+    if not vim.api.nvim_buf_is_valid(new_bufnr) then return end
+
+    -- Don't switch if Fluoride buffer has unsaved reorder changes
+    if vim.api.nvim_get_option_value("modified", { buf = buf }) then return end
+
+    -- Try to parse the new buffer
+    local treesitter = require("fluoride.treesitter")
+    local new_entries, new_lang = treesitter.get_code_points(new_bufnr)
+    if not new_lang or #new_entries == 0 then return end
+
+    -- Save current buffer state
+    save_current_state()
+
+    -- Switch to new buffer
+    source_bufnr = new_bufnr
+    entries = new_entries
+    lang = new_lang
+    highlights = new_lang.highlights or {}
+    sorted_prefixes = build_sorted_prefixes(highlights)
+
+    -- Restore saved state or use defaults
+    local saved = buf_states[new_bufnr]
+    if saved then
+      current_depth = saved.current_depth
+      collapsed = {}
+      restore_collapsed(entries, saved.collapsed_keys, nil)
+    else
+      current_depth = configured_max_depth
+      collapsed = {}
+    end
+
+    rebuild_display()
+
+    -- Reposition sidebar next to the new source window
+    current_source_win = find_source_win()
+    reposition_sidebar()
+  end
+
   -- Refresh the Fluoride display from the source buffer
   local function refresh_display()
     local treesitter = require("fluoride.treesitter")
@@ -867,58 +980,49 @@ function M.open(source_bufnr, entries, lang, config)
   -- Track the active window
   active_win = win
 
-  -- Reposition window when terminal is resized.
-  -- Sidebar mode: keep the initial pixel dimensions, only reposition.
-  -- Centered mode: recalculate proportionally.
-  local sb = win_config.sidebar or {}
-  local ct = win_config.centered or {}
-  local sidebar_width = math.floor(vim.o.columns * (sb.width or 0.3))
-  local sidebar_height = math.floor(vim.o.lines * (sb.height or 0.85))
+  -- Reposition sidebar when terminal or splits are resized
   local resize_group = vim.api.nvim_create_augroup("fluoride_resize", { clear = true })
-  vim.api.nvim_create_autocmd("VimResized", {
+  vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
     group = resize_group,
     callback = function()
       if not vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_del_augroup_by_id(resize_group)
         return
       end
-
-      local new_width, new_height, new_row, new_col
-      if vim.o.columns < (win_config.center_breakpoint or 80) then
-        new_width = math.floor(vim.o.columns * (ct.width or 0.6))
-        new_height = math.floor(vim.o.lines * (ct.height or 0.6))
-        new_row = math.floor((vim.o.lines - new_height) / 2)
-        new_col = math.floor((vim.o.columns - new_width) / 2)
-      else
-        new_width = sidebar_width
-        new_height = sidebar_height
-        new_row = sb.row or 2
-        new_col = vim.o.columns - new_width - (sb.col or 2)
-      end
-
-      new_width = math.min(new_width, vim.o.columns - 2)
-      new_height = math.min(new_height, vim.o.lines - 2)
-      new_col = math.max(new_col, 0)
-      new_row = math.max(new_row, 0)
-
-      vim.api.nvim_win_set_config(win, {
-        relative = "editor",
-        width = new_width,
-        height = new_height,
-        row = new_row,
-        col = new_col,
-      })
+      reposition_sidebar()
     end,
   })
 
-  -- Auto-reload code points when the source file is saved
+  -- Auto-reload code points when the current source file is saved
+  local source_group = vim.api.nvim_create_augroup("fluoride_source", { clear = true })
   vim.api.nvim_create_autocmd("BufWritePost", {
-    buffer = source_bufnr,
-    callback = function()
+    group = source_group,
+    callback = function(ev)
       if not vim.api.nvim_win_is_valid(win) then return end
       if not vim.api.nvim_buf_is_valid(buf) then return end
+      if ev.buf ~= source_bufnr then return end
 
       pcall(refresh_display)
+    end,
+  })
+
+  -- Switch source when user enters a different split or changes buffer
+  vim.api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
+    group = source_group,
+    callback = function()
+      if not vim.api.nvim_win_is_valid(win) then return end
+      local entered_win = vim.api.nvim_get_current_win()
+      if entered_win == win then return end
+      local new_bufnr = vim.api.nvim_win_get_buf(entered_win)
+      if new_bufnr == buf then return end
+
+      current_source_win = entered_win
+      if new_bufnr ~= source_bufnr then
+        switch_source(new_bufnr)
+      else
+        -- Same buffer in a different window — just reposition
+        reposition_sidebar()
+      end
     end,
   })
 
@@ -929,6 +1033,7 @@ function M.open(source_bufnr, entries, lang, config)
     callback = function()
       active_win = nil
       pcall(vim.api.nvim_del_augroup_by_id, resize_group)
+      pcall(vim.api.nvim_del_augroup_by_id, source_group)
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })
       end

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Fluoride TypeScript test file — comprehensive syntax coverage
 // Covers: functions, const/let/var, class, abstract class, interface, type,
 // enum, export, declare, namespace, control flow, expression statements

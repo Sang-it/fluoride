@@ -432,8 +432,11 @@ function M.open(source_bufnr, entries, lang, config)
   -- Reposition sidebar relative to the current source window
   local function reposition_sidebar()
     if not vim.api.nvim_win_is_valid(win) then return end
-    local src_win = find_source_win() or current_source_win
-    if not src_win or not vim.api.nvim_win_is_valid(src_win) then return end
+    local src_win = current_source_win
+    if not src_win or not vim.api.nvim_win_is_valid(src_win) then
+      src_win = find_source_win()
+    end
+    if not src_win then return end
     local width, height, row, col = compute_sidebar_geometry(src_win, win_config)
     vim.api.nvim_win_set_config(win, {
       relative = "editor",

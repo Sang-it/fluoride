@@ -269,7 +269,8 @@ end
 --- @param win_config table window configuration from plugin config
 --- @param source_win number|nil source window handle
 --- @return number win window handle
-local function open_sidebar(buf, win_config, source_win)
+local function open_sidebar(buf, win_config, source_win, enter)
+  if enter == nil then enter = true end
   local width, height, row, col = compute_sidebar_geometry(source_win, win_config)
 
   local win_opts = {
@@ -287,7 +288,7 @@ local function open_sidebar(buf, win_config, source_win)
     win_opts.title_pos = "center"
   end
 
-  local win = vim.api.nvim_open_win(buf, true, win_opts)
+  local win = vim.api.nvim_open_win(buf, enter, win_opts)
 
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
   vim.api.nvim_set_option_value("number", true, { win = win })
@@ -320,7 +321,7 @@ function M.open(source_bufnr, entries, lang, config)
   -- Create a scratch buffer with acwrite so :w triggers BufWriteCmd
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value("buftype", "acwrite", { buf = buf })
-  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
 
   -- Populate the buffer with display lines (placeholder, repopulated after config is read)
@@ -342,6 +343,7 @@ function M.open(source_bufnr, entries, lang, config)
   local configured_max_depth = config and config.max_depth or 1
   local current_depth = configured_max_depth
   local collapsed = {} -- per-entry fold state (entry reference -> true)
+  local sidebar_visible = true
   local current_source_win = vim.api.nvim_get_current_win()
   local win = open_sidebar(buf, win_config, current_source_win)
 
@@ -445,6 +447,14 @@ function M.open(source_bufnr, entries, lang, config)
       row = row,
       col = col,
     })
+  end
+
+  -- Hide sidebar (unsupported buffer focused)
+  local function hide_sidebar()
+    if sidebar_visible and vim.api.nvim_win_is_valid(win) then
+      sidebar_visible = false
+      vim.api.nvim_win_hide(win)
+    end
   end
 
   -- Close window helper
@@ -719,6 +729,16 @@ function M.open(source_bufnr, entries, lang, config)
     update_footer()
   end
 
+  -- Show sidebar (supported buffer focused again)
+  local function show_sidebar()
+    if not sidebar_visible and vim.api.nvim_buf_is_valid(buf) then
+      win = open_sidebar(buf, win_config, current_source_win, false)
+      active_win = win
+      sidebar_visible = true
+      rebuild_display()
+    end
+  end
+
   local function switch_source(new_bufnr)
     if new_bufnr == source_bufnr then return end
     if not vim.api.nvim_buf_is_valid(new_bufnr) then return end
@@ -729,7 +749,12 @@ function M.open(source_bufnr, entries, lang, config)
     -- Try to parse the new buffer
     local treesitter = require("fluoride.treesitter")
     local new_entries, new_lang = treesitter.get_code_points(new_bufnr)
-    if not new_lang or #new_entries == 0 then return end
+    if not new_lang or #new_entries == 0 then
+      hide_sidebar()
+      return
+    end
+
+    show_sidebar()
 
     -- Save current buffer state
     save_current_state()
@@ -1013,9 +1038,9 @@ function M.open(source_bufnr, entries, lang, config)
   vim.api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
     group = source_group,
     callback = function()
-      if not vim.api.nvim_win_is_valid(win) then return end
+      if not vim.api.nvim_buf_is_valid(buf) then return end
       local entered_win = vim.api.nvim_get_current_win()
-      if entered_win == win then return end
+      if vim.api.nvim_win_is_valid(win) and entered_win == win then return end
       local new_bufnr = vim.api.nvim_win_get_buf(entered_win)
       if new_bufnr == buf then return end
 
@@ -1023,18 +1048,24 @@ function M.open(source_bufnr, entries, lang, config)
       if new_bufnr ~= source_bufnr then
         switch_source(new_bufnr)
       else
-        -- Same buffer in a different window — just reposition
+        -- Same buffer — restore sidebar if hidden, otherwise reposition
+        show_sidebar()
         reposition_sidebar()
       end
     end,
   })
 
-  -- Cleanup buffer when window is closed
+  -- Cleanup when the sidebar is explicitly closed (q / :q), not hidden
   vim.api.nvim_create_autocmd("WinClosed", {
-    pattern = tostring(win),
-    once = true,
-    callback = function()
+    group = source_group,
+    callback = function(ev)
+      -- Only react to our sidebar window being closed
+      if tonumber(ev.match) ~= win then return end
+      -- If we hid it ourselves, don't clean up
+      if not sidebar_visible then return end
+
       active_win = nil
+      sidebar_visible = false
       pcall(vim.api.nvim_del_augroup_by_id, resize_group)
       pcall(vim.api.nvim_del_augroup_by_id, source_group)
       if vim.api.nvim_buf_is_valid(buf) then

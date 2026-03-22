@@ -4,6 +4,7 @@ local rename = require("fluoride.rename")
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("fluoride_hl")
+local fold_ns = vim.api.nvim_create_namespace("fluoride_fold")
 
 --- Build a sorted list of prefixes from a highlights table (longest first).
 --- @param highlights table<string, table> map of display_type → { prefix, name }
@@ -47,12 +48,14 @@ end
 --- @param depth number current nesting depth (0 = top-level)
 --- @param max_depth number maximum depth to display children
 --- @param path number[] ancestor indices path
-local function add_entry_lines(lines, flat_map, entry, depth, max_depth, path)
+--- @param collapsed table|nil set of entries whose children are folded
+local function add_entry_lines(lines, flat_map, entry, depth, max_depth, path, collapsed)
   local prefix = depth_prefix(depth)
   table.insert(lines, prefix .. entry_display(entry))
   table.insert(flat_map, { entry = entry, depth = depth, path = vim.deepcopy(path) })
 
-  if depth < max_depth and entry.children and #entry.children > 0 then
+  local is_collapsed = collapsed and collapsed[entry]
+  if depth < max_depth and entry.children and #entry.children > 0 and not is_collapsed then
     local last_access = nil
     for j, child in ipairs(entry.children) do
       -- Insert access specifier separator when access changes (C/C++ public/protected/private)
@@ -65,7 +68,7 @@ local function add_entry_lines(lines, flat_map, entry, depth, max_depth, path)
 
       local child_path = vim.deepcopy(path)
       table.insert(child_path, j)
-      add_entry_lines(lines, flat_map, child, depth + 1, max_depth, child_path)
+      add_entry_lines(lines, flat_map, child, depth + 1, max_depth, child_path, collapsed)
     end
   end
 end
@@ -74,17 +77,37 @@ end
 --- The flat_map maps each 1-indexed buffer line to its entry with depth and path.
 --- @param entries table[] list of code point entries from treesitter module
 --- @param max_depth number maximum nesting depth to display (0 = no children)
+--- @param collapsed table|nil set of entries whose children are folded
 --- @return string[] display_lines
 --- @return table[] flat_map list of { entry, depth, path }
-local function build_display_lines(entries, max_depth)
+local function build_display_lines(entries, max_depth, collapsed)
   local lines = {}
   local flat_map = {}
 
   for i, entry in ipairs(entries) do
-    add_entry_lines(lines, flat_map, entry, 0, max_depth, { i })
+    add_entry_lines(lines, flat_map, entry, 0, max_depth, { i }, collapsed)
   end
 
   return lines, flat_map
+end
+
+--- Apply fold indicators (▸/▾) as virtual text on entries that have children.
+--- @param buf number buffer handle
+--- @param flat_map table[] flat entry map
+--- @param max_depth number current max depth
+--- @param collapsed table set of collapsed entries
+local function apply_fold_indicators(buf, flat_map, max_depth, collapsed)
+  vim.api.nvim_buf_clear_namespace(buf, fold_ns, 0, -1)
+  for i, map_entry in ipairs(flat_map) do
+    local entry = map_entry.entry
+    if entry and entry.children and #entry.children > 0 then
+      local indicator = (collapsed[entry] or map_entry.depth >= max_depth) and " ▸" or " ▾"
+      vim.api.nvim_buf_set_extmark(buf, fold_ns, i - 1, 0, {
+        virt_text = { { indicator, "Comment" } },
+        virt_text_pos = "eol",
+      })
+    end
+  end
 end
 
 --- Apply syntax highlighting to all lines in the fluoride buffer.
@@ -281,15 +304,17 @@ function M.open(source_bufnr, entries, lang, config)
   local rename_duration = hl_config.rename_duration or 130
   local configured_max_depth = config and config.max_depth or 1
   local current_depth = configured_max_depth
+  local collapsed = {} -- per-entry fold state (entry reference -> true)
   local win = open_sidebar(buf, win_config)
 
   -- Repopulate with correct depth state
-  display_lines, flat_map = build_display_lines(entries, current_depth)
+  display_lines, flat_map = build_display_lines(entries, current_depth, collapsed)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
   vim.api.nvim_set_option_value("modified", false, { buf = buf })
 
-  -- Apply initial syntax highlighting
+  -- Apply initial syntax highlighting and fold indicators
   apply_highlights(buf, highlights, sorted_prefixes)
+  apply_fold_indicators(buf, flat_map, current_depth, collapsed)
 
   -- Add help footer at the bottom of the window (if enabled)
   local show_footer = win_config.footer ~= false
@@ -308,6 +333,7 @@ function M.open(source_bufnr, entries, lang, config)
     end
     local parts = { ":w=submit" }
     if km.close ~= false then table.insert(parts, (km.close or "q") .. "=close") end
+    table.insert(parts, "<Tab>=fold")
     table.insert(virt_lines, { { table.concat(parts, " "), "Comment" } })
     vim.api.nvim_buf_set_extmark(buf, footer_ns, line_count - 1, 0, {
       virt_lines = virt_lines,
@@ -450,8 +476,8 @@ function M.open(source_bufnr, entries, lang, config)
       end
     end, "LSP hover for code point")
 
-    -- Cycle child declarations depth visibility
-    map(km.toggle_children or "<Tab>", function()
+    -- Cycle global depth visibility
+    local function cycle_global_depth()
       -- Compute the actual max depth present in the entries so we don't
       -- cycle through depths that produce no visible difference
       local function get_max_depth(entry_list, depth)
@@ -471,13 +497,76 @@ function M.open(source_bufnr, entries, lang, config)
       else
         current_depth = current_depth + 1
       end
-      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
+
+      -- Reset per-entry folds when cycling global depth
+      collapsed = {}
+
+      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth, collapsed)
       flat_map = new_flat_map
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
       vim.api.nvim_set_option_value("modified", false, { buf = buf })
       apply_highlights(buf, highlights, sorted_prefixes)
+      apply_fold_indicators(buf, flat_map, current_depth, collapsed)
       update_footer()
-    end, "Cycle child declarations depth")
+    end
+
+    -- Toggle fold for entry under cursor, or cycle global depth for non-containers
+    map(km.toggle_children or "<Tab>", function()
+      local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+      local map_entry = flat_map[cursor_line]
+      if not map_entry or not map_entry.entry then return end
+
+      local entry = map_entry.entry
+      local has_children = entry.children and #entry.children > 0
+
+      -- Non-container entries: fall back to global depth cycling
+      if not has_children then
+        cycle_global_depth()
+        return
+      end
+
+      -- If children aren't visible yet (current_depth too low), bump depth
+      -- and collapse everything else so only this container expands
+      if map_entry.depth >= current_depth then
+        current_depth = map_entry.depth + 1
+        local function collapse_all(entry_list)
+          for _, e in ipairs(entry_list) do
+            if e.children and #e.children > 0 then
+              collapsed[e] = true
+              collapse_all(e.children)
+            end
+          end
+        end
+        collapse_all(entries)
+        collapsed[entry] = nil
+      else
+        -- Normal toggle
+        if collapsed[entry] then
+          collapsed[entry] = nil
+        else
+          collapsed[entry] = true
+        end
+      end
+
+      -- Rebuild display
+      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth, collapsed)
+      flat_map = new_flat_map
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
+      vim.api.nvim_set_option_value("modified", false, { buf = buf })
+      apply_highlights(buf, highlights, sorted_prefixes)
+      apply_fold_indicators(buf, flat_map, current_depth, collapsed)
+      update_footer()
+
+      -- Keep cursor on the same entry
+      for j, m in ipairs(flat_map) do
+        if m.entry == entry then
+          vim.api.nvim_win_set_cursor(win, { j, 0 })
+          break
+        end
+      end
+    end, "Toggle fold for entry under cursor")
+
+    map(km.cycle_depth or "<S-Tab>", cycle_global_depth, "Cycle global depth")
 
     -- Peek + copy code block
     local yank_comments = config and config.yank_comments ~= false
@@ -513,17 +602,64 @@ function M.open(source_bufnr, entries, lang, config)
 
   setup_keymaps()
 
+  -- Build a stable identity key for an entry based on its position in the tree.
+  -- Uses display_type + name at each ancestor level to survive re-parsing.
+  local function entry_key(entry, parent_keys)
+    local key = (entry.display_type or "") .. ":" .. (entry.name or "")
+    if parent_keys then
+      return parent_keys .. "/" .. key
+    end
+    return key
+  end
+
+  -- Collect keys of all collapsed entries from the current entry tree.
+  local function collect_collapsed_keys(entry_list, parent_keys)
+    local keys = {}
+    for _, e in ipairs(entry_list) do
+      local k = entry_key(e, parent_keys)
+      if collapsed[e] then
+        keys[k] = true
+      end
+      if e.children and #e.children > 0 then
+        local child_keys = collect_collapsed_keys(e.children, k)
+        for ck, v in pairs(child_keys) do
+          keys[ck] = v
+        end
+      end
+    end
+    return keys
+  end
+
+  -- Restore collapsed state on new entries by matching keys.
+  local function restore_collapsed(entry_list, saved_keys, parent_keys)
+    for _, e in ipairs(entry_list) do
+      local k = entry_key(e, parent_keys)
+      if saved_keys[k] then
+        collapsed[e] = true
+      end
+      if e.children and #e.children > 0 then
+        restore_collapsed(e.children, saved_keys, k)
+      end
+    end
+  end
+
   -- Refresh the Fluoride display from the source buffer
   local function refresh_display()
     local treesitter = require("fluoride.treesitter")
     local new_entries, _ = treesitter.get_code_points(source_bufnr)
     if #new_entries > 0 then
+      -- Preserve fold state across re-parse by matching on entry identity
+      local saved_keys = collect_collapsed_keys(entries, nil)
       entries = new_entries
-      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth)
+      collapsed = {}
+      restore_collapsed(entries, saved_keys, nil)
+
+      local new_display_lines, new_flat_map = build_display_lines(entries, current_depth, collapsed)
       flat_map = new_flat_map
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_display_lines)
       vim.api.nvim_set_option_value("modified", false, { buf = buf })
       apply_highlights(buf, highlights, sorted_prefixes)
+      apply_fold_indicators(buf, flat_map, current_depth, collapsed)
       update_footer()
     end
   end

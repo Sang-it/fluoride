@@ -25,6 +25,7 @@ local DEFAULT_CONFIG = {
     peek = "gd",
     hover = "K",
     toggle_children = "<Tab>",
+    cycle_depth = "<S-Tab>",
     yank = "gy",
   },
   max_depth = 1,

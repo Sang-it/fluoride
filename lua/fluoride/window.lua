@@ -1111,20 +1111,24 @@ function M.open(source_bufnr, entries, lang, config, mode)
   vim.api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
     group = source_group,
     callback = function()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      local entered_win = vim.api.nvim_get_current_win()
-      if vim.api.nvim_win_is_valid(win) and entered_win == win then return end
-      local new_bufnr = vim.api.nvim_win_get_buf(entered_win)
-      if new_bufnr == buf then return end
+      -- Defer to avoid E242 ("Can't split a window while closing another")
+      -- which occurs when WinEnter fires during a float close (e.g. LSP hover)
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(buf) then return end
+        local entered_win = vim.api.nvim_get_current_win()
+        if vim.api.nvim_win_is_valid(win) and entered_win == win then return end
+        local new_bufnr = vim.api.nvim_win_get_buf(entered_win)
+        if new_bufnr == buf then return end
 
-      current_source_win = entered_win
-      if new_bufnr ~= source_bufnr then
-        switch_source(new_bufnr)
-      else
-        -- Same buffer — restore sidebar if hidden, otherwise reposition
-        show_sidebar()
-        reposition_sidebar()
-      end
+        current_source_win = entered_win
+        if new_bufnr ~= source_bufnr then
+          switch_source(new_bufnr)
+        else
+          -- Same buffer — restore sidebar if hidden, otherwise reposition
+          show_sidebar()
+          reposition_sidebar()
+        end
+      end)
     end,
   })
 
